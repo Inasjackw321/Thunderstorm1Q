@@ -19,37 +19,26 @@
   const BAR_SCALE  = 0.6;      // matches HEAT_MAX so bars feel the heat.
 
   const POLL_MS = 5 * 60 * 1000;
-  const AUTOPLAY_MS = 850;
-  const STALE_MIN = 330;       // 5h cron + a grace period; anything older is "stale"
+  const STALE_MIN = 840;       // 12h cron + a 2h grace period; anything older is "stale"
 
   // Per-day metadata. `bars` is authoritative for the sparkline division
   // count; `fh` labels in tooltips match the data file's `hours[].fh`.
   const DAYS = [
-    { n: 1, label: '1-24h', bars: 24, fhPrefix: 'F',
-      axis: ['now', '+6h', '+12h', '+18h', '+24h'] },
-    { n: 2, label: 'Day 2', bars:  4, fhPrefix: 'W',
-      axis: ['+24h', '+36h', '+48h'] },
-    { n: 3, label: 'Day 3', bars:  4, fhPrefix: 'W',
-      axis: ['+48h', '+60h', '+72h'] },
+    { n: 1, label: '1-24h', bars: 24, fhPrefix: 'F' },
+    { n: 2, label: 'Day 2', bars:  4, fhPrefix: 'W' },
+    { n: 3, label: 'Day 3', bars:  4, fhPrefix: 'W' },
   ];
 
   const spark     = document.getElementById('spark');
   const sparkBars = document.getElementById('spark-bars');
   const sparkHead = document.getElementById('spark-head');
   const sparkTip  = document.getElementById('spark-tip');
-  const sparkAxis = document.getElementById('spark-axis');
   const tipFh     = document.getElementById('tip-fh');
   const tipPct    = document.getElementById('tip-pct');
-  const hourLabel = document.getElementById('hour-label');
   const roPct     = document.getElementById('ro-pct');
-  const roDate    = document.getElementById('ro-date');
   const roTime    = document.getElementById('ro-time');
   const roStatus  = document.getElementById('ro-status');
   const roStatTxt = document.getElementById('ro-status-text');
-  const playBtn   = document.getElementById('play');
-  const prevBtn   = document.getElementById('prev');
-  const nextBtn   = document.getElementById('next');
-  const peakBtn   = document.getElementById('peak');
   const banner    = document.getElementById('state-banner');
   const pillsEl   = document.getElementById('day-pills');
   const pillEls   = Array.from(pillsEl.querySelectorAll('.pill'));
@@ -62,8 +51,6 @@
   let currentFh = 1;
   let totalFrames = DAYS[0].bars;
   let heatLayer = null;
-  let playing = false;
-  let playTimer = null;
   let bars = [];
 
   // Leaflet: locked map.
@@ -94,10 +81,6 @@
     pane: 'shadowPane', maxZoom: 18, subdomains: 'abcd',
   }).addTo(map);
 
-  playBtn.addEventListener('click', toggleAutoplay);
-  prevBtn.addEventListener('click', () => { stopAutoplay(); setFrame(currentFh - 1); });
-  nextBtn.addEventListener('click', () => { stopAutoplay(); setFrame(currentFh + 1); });
-  peakBtn.addEventListener('click', jumpToPeak);
   spark.addEventListener('keydown', onSparkKey);
   spark.addEventListener('pointerdown', onSparkPointerDown);
   spark.addEventListener('pointermove', onSparkHover);
@@ -164,16 +147,6 @@
     spark.setAttribute('aria-valuemax', String(n));
   }
 
-  function setAxis(labels) {
-    if (!sparkAxis) return;
-    sparkAxis.innerHTML = '';
-    labels.forEach(text => {
-      const s = document.createElement('span');
-      s.textContent = text;
-      sparkAxis.appendChild(s);
-    });
-  }
-
   function paintSpark() {
     const d = datasets[currentDay];
     const hours = (d && d.hours) || [];
@@ -219,7 +192,6 @@
   }
   function onSparkPointerDown(e) {
     if (e.button !== undefined && e.button !== 0) return;
-    stopAutoplay();
     spark.classList.add('dragging');
     try { spark.setPointerCapture(e.pointerId); } catch (_) {}
     setFrame(fhFromClientX(e.clientX));
@@ -311,7 +283,6 @@
 
   function switchDay(n) {
     if (!DAYS.find(d => d.n === n)) return;
-    stopAutoplay();
     currentDay = n;
     pillEls.forEach(el => {
       el.setAttribute('aria-selected',
@@ -329,7 +300,6 @@
       totalFrames = n;
       buildSpark(n);
     }
-    setAxis(spec.axis);
     if (!keepFrame) {
       const m = metas[currentDay];
       const peakObj = (m && m.peaks && m.peaks.tornado) ||
@@ -372,13 +342,9 @@
 
     const mx = typeof h.max === 'number' ? h.max : 0;
     const validIso = rec && rec.valid;
-    const prefix = DAYS[currentDay - 1].fhPrefix;
 
-    setLabel(roPct,     (mx * 100).toFixed(0) + '%');
-    setLabel(roDate,    fmtDate(validIso));
-    setLabel(roTime,    prefix + String(fh).padStart(2, '0') +
-                        ' · ' + fmtHour(validIso));
-    setLabel(hourLabel, fmtShortHour(validIso));
+    setLabel(roPct,  (mx * 100).toFixed(0) + '%');
+    setLabel(roTime, fmtDate(validIso) + ' · ' + fmtHour(validIso));
     tintReadout(mx);
   }
 
@@ -445,28 +411,7 @@
 
   // ---------- controls ----------
 
-  function toggleAutoplay() { playing ? stopAutoplay() : startAutoplay(); }
-  function startAutoplay() {
-    playing = true;
-    playBtn.classList.add('on');
-    playBtn.textContent = '■';
-    playBtn.setAttribute('aria-label', 'Pause animation');
-    playTimer = setInterval(() => {
-      let v = currentFh + 1;
-      if (v > totalFrames) v = 1;
-      currentFh = v;
-      renderHour(v);
-    }, AUTOPLAY_MS);
-  }
-  function stopAutoplay() {
-    playing = false;
-    playBtn.classList.remove('on');
-    playBtn.textContent = '▶';
-    playBtn.setAttribute('aria-label', 'Play animation');
-    if (playTimer) { clearInterval(playTimer); playTimer = null; }
-  }
   function jumpToPeak() {
-    stopAutoplay();
     const m = metas[currentDay];
     const peakObj = (m && m.peaks && m.peaks.tornado) ||
                     (m && m.peak) || null;
@@ -476,9 +421,8 @@
 
   function onKey(e) {
     if (e.target && /^(INPUT|TEXTAREA)$/.test(e.target.tagName)) return;
-    if (e.code === 'Space') { e.preventDefault(); toggleAutoplay(); }
-    else if (e.key === 'ArrowRight') { stopAutoplay(); setFrame(currentFh + 1); }
-    else if (e.key === 'ArrowLeft')  { stopAutoplay(); setFrame(currentFh - 1); }
+    if (e.key === 'ArrowRight')      { setFrame(currentFh + 1); }
+    else if (e.key === 'ArrowLeft')  { setFrame(currentFh - 1); }
     else if (e.key === 'p' || e.key === 'P') { jumpToPeak(); }
     else if (e.key === '1') { switchDay(1); }
     else if (e.key === '2') { switchDay(2); }
@@ -486,13 +430,13 @@
   }
   function onSparkKey(e) {
     if (e.key === 'ArrowRight' || e.key === 'ArrowUp') {
-      e.preventDefault(); stopAutoplay(); setFrame(currentFh + 1);
+      e.preventDefault(); setFrame(currentFh + 1);
     } else if (e.key === 'ArrowLeft' || e.key === 'ArrowDown') {
-      e.preventDefault(); stopAutoplay(); setFrame(currentFh - 1);
+      e.preventDefault(); setFrame(currentFh - 1);
     } else if (e.key === 'Home') {
-      e.preventDefault(); stopAutoplay(); setFrame(1);
+      e.preventDefault(); setFrame(1);
     } else if (e.key === 'End') {
-      e.preventDefault(); stopAutoplay(); setFrame(totalFrames);
+      e.preventDefault(); setFrame(totalFrames);
     }
   }
 
@@ -503,13 +447,6 @@
       return new Date(iso).toLocaleString('en-GB', {
         hour: '2-digit', minute: '2-digit',
         hourCycle: 'h23', timeZone: 'UTC',
-      }) + 'Z';
-    } catch { return iso || ''; }
-  }
-  function fmtShortHour(iso) {
-    try {
-      return new Date(iso).toLocaleString('en-GB', {
-        hour: '2-digit', hourCycle: 'h23', timeZone: 'UTC',
       }) + 'Z';
     } catch { return iso || ''; }
   }

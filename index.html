@@ -53,19 +53,9 @@
   <div class="rail-bar" aria-hidden="true"></div>
 </aside>
 
-<section class="readout" aria-label="Current hour readout">
-  <div class="ro-head">
-    <svg class="tor-glyph" viewBox="0 0 24 24" width="14" height="14" aria-hidden="true">
-      <path d="M3 4 Q12 6 21 4 L18 10 Q12 11 6 10 Z M6 11 Q12 12 18 11 L15.5 16 Q12 16.5 8.5 16 Z M8.5 17 Q12 17.3 15.5 17 L13.5 20 Q12 20.2 10.5 20 Z"
-            fill="currentColor"/>
-    </svg>
-    <span class="ro-kicker">Tornado</span>
-    <span class="ro-tz" title="Times shown in UTC / Zulu">UTC</span>
-  </div>
+<section class="readout" aria-label="Current frame readout">
   <div class="ro-pct" id="ro-pct">&mdash;</div>
-  <div class="ro-date" id="ro-date">&mdash;</div>
   <div class="ro-time" id="ro-time">&mdash;</div>
-  <div class="ro-divider" aria-hidden="true"></div>
   <div class="ro-status" id="ro-status">
     <span class="ro-dot"></span>
     <span class="ro-status-text" id="ro-status-text">loading</span>
@@ -84,13 +74,6 @@
             title="Day 3, 6-hour max windows (GFS) — press 3">Day 3</button>
   </div>
 
-  <div class="t-ctrls">
-    <button id="prev" class="t-btn" title="Previous frame (←)" aria-label="Previous frame">&#9664;</button>
-    <button id="play" class="t-btn t-play" title="Play / pause (Space)" aria-label="Play animation">&#9654;</button>
-    <button id="peak" class="t-btn" title="Jump to peak (P)" aria-label="Jump to peak frame">&#9650;</button>
-    <button id="next" class="t-btn" title="Next frame (→)" aria-label="Next frame">&#9654;</button>
-  </div>
-
   <div class="spark-wrap">
     <div class="spark" id="spark" role="slider"
          aria-label="Forecast frame"
@@ -103,12 +86,7 @@
         <span class="tip-pct" id="tip-pct">0%</span>
       </div>
     </div>
-    <div class="spark-axis" id="spark-axis" aria-hidden="true">
-      <span>now</span><span>+6h</span><span>+12h</span><span>+18h</span><span>+24h</span>
-    </div>
   </div>
-
-  <div class="t-now" id="hour-label">&mdash;</div>
 </footer>
 
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"

@@ -18,12 +18,10 @@ import dataclasses as _dc
 import datetime as dt
 import json
 import sys
-import threading
 import time
 import urllib.error
 import urllib.parse
 import urllib.request
-from concurrent.futures import ThreadPoolExecutor, as_completed
 
 import numpy as np
 
@@ -58,8 +56,12 @@ HOURLY_VARS = [
 ]
 
 BATCH_SIZE = 100             # coords per Open-Meteo call
-MAX_WORKERS = 4              # concurrent batches
+INTER_BATCH_SLEEP_S = 3.0    # gap between consecutive batches; the
+                             # free tier has a per-minute throttle,
+                             # not a per-day cap, so a tiny pause
+                             # buys us nearly 100% success
 RETRY_BACKOFF_S = [6, 18]    # ~24s worst case per batch
+RATE_LIMIT_BACKOFF_S = 65    # 429 = "minutely limit" — wait it out
 PER_REQUEST_TIMEOUT = 30     # seconds
 MAX_BATCH_ERROR_FRAC = 0.25
 
@@ -125,6 +127,13 @@ def _fetch_once(pairs, cfg: FetchConfig):
             return data
         except APIError as exc:
             last_err = exc
+            if exc.code == 429:
+                # Minutely throttle. Sleep past the next minute boundary
+                # so the next attempt starts in a fresh window.
+                print(f"  429: sleeping {RATE_LIMIT_BACKOFF_S}s for rate-limit reset",
+                      file=sys.stderr)
+                time.sleep(RATE_LIMIT_BACKOFF_S)
+                continue
             if exc.code == 400:
                 # Structural — retrying won't help. Surface to caller
                 # so the bisect path can kick in if it's "no data".
@@ -153,8 +162,13 @@ def fetch_batch(pairs, cfg: FetchConfig):
 
 
 def fetch_grid(grid, cfg: FetchConfig):
-    """Fetch the whole CONUS grid in a small thread pool. Raises if
-    too many batches fail (cached JSON keeps serving the page)."""
+    """Fetch the whole CONUS grid serially with a small inter-batch
+    pause. Open-Meteo's free tier has a per-minute throttle (not a
+    per-day cap), so concurrency triggers 429s on a CONUS-scale grid;
+    serializing with a few seconds of breathing room is the simplest
+    way to stay safely under it.
+
+    Raises if too many batches fail (cached JSON keeps serving the page)."""
     pairs = grid.flat_pairs()
     batches = [
         (start, pairs[start:start + BATCH_SIZE])
@@ -162,34 +176,23 @@ def fetch_grid(grid, cfg: FetchConfig):
     ]
     results = [None] * len(pairs)
     failures = 0
-    lock = threading.Lock()
     t0 = time.monotonic()
     print(f"{len(pairs)} grid points in {len(batches)} batches "
-          f"(workers={MAX_WORKERS}, batch={BATCH_SIZE}, "
+          f"(serial, batch={BATCH_SIZE}, sleep={INTER_BATCH_SLEEP_S}s, "
           f"models={cfg.models or 'auto'}, hours={cfg.forecast_hours})")
 
-    def _run_one(idx, start, chunk):
+    for i, (start, chunk) in enumerate(batches):
+        if i > 0:
+            time.sleep(INTER_BATCH_SLEEP_S)
         try:
             data = fetch_batch(chunk, cfg)
         except Exception as exc:
-            return idx, start, None, exc
-        return idx, start, data, None
-
-    with ThreadPoolExecutor(max_workers=MAX_WORKERS) as pool:
-        futures = [
-            pool.submit(_run_one, i, start, chunk)
-            for i, (start, chunk) in enumerate(batches)
-        ]
-        for fut in as_completed(futures):
-            idx, start, data, exc = fut.result()
-            if exc is not None:
-                with lock:
-                    failures += 1
-                print(f"  batch {idx + 1}/{len(batches)} failed: {exc!r}",
-                      file=sys.stderr)
-                continue
-            for i, point in enumerate(data):
-                results[start + i] = point
+            failures += 1
+            print(f"  batch {i + 1}/{len(batches)} failed: {exc!r}",
+                  file=sys.stderr)
+            continue
+        for k, point in enumerate(data):
+            results[start + k] = point
 
     elapsed = time.monotonic() - t0
     print(f"fetch complete in {elapsed:.1f}s "
@@ -244,10 +247,17 @@ def derive_fields(point_hourly, hour_idx):
     shear_01 = common.shear_ms(u10, v10, u85, v85)
     shear_03 = common.shear_ms(u10, v10, u70, v70)
     shear_06 = common.shear_ms(u10, v10, u50, v50)
-    cross01 = u10 * v85 - v10 * u85
-    cross03 = u10 * v70 - v10 * u70
-    srh01 = common.srh_proxy(shear_01, cross01)
-    srh03 = common.srh_proxy(shear_03, cross03) * 1.25
+
+    # Bunkers right-mover storm motion -> true layer SRH instead of
+    # the older cross-product proxy. The 0-6 km mean is approximated
+    # by averaging the four wind levels we have (10 m / 850 / 700 /
+    # 500 hPa); the deep-layer shear vector is 500 hPa - 10 m.
+    u_mean = 0.25 * (u10 + u85 + u70 + u50)
+    v_mean = 0.25 * (v10 + v85 + v70 + v50)
+    cu, cv = common.bunkers_right_mover(u_mean, v_mean,
+                                        u50 - u10, v50 - v10)
+    srh01 = common.srh_layer(u10, v10, u85, v85, cu, cv)
+    srh03 = common.srh_layer(u10, v10, u70, v70, cu, cv)
     lcl = common.lcl_height_m(t2, td2)
     low_lapse = common.low_level_lapse_rate(t2, t85)
 
@@ -278,10 +288,15 @@ def find_hour_indices(sample_hourly, first_valid_utc, n_hours):
     return indices
 
 
-def score_hour(grid, results, src_idx):
+def score_hour(grid, results, src_idx, valid_dt=None):
     """Run one forecast hour through the physics blend and return the
     smoothed 2-D tornado-probability field. Returns a zero field if
-    the hour is missing from the Open-Meteo response."""
+    the hour is missing from the Open-Meteo response.
+
+    If `valid_dt` is supplied, applies the per-cell diurnal-climatology
+    weight (peaks late afternoon LST, troughs around dawn) so the
+    nocturnal CONUS doesn't show the same risk as a 5pm warm sector.
+    """
     if src_idx is None:
         return np.zeros(grid.shape, dtype=np.float64)
     f = extract_hour_fields(grid, results, src_idx)
@@ -289,7 +304,17 @@ def score_hour(grid, results, src_idx):
         f["cape"], f["cin"], f["lcl"], f["srh01"], f["srh03"],
         f["s01"], f["s03"], f["s06"],
         f["precip"], f["wc"], f["lapse"])
-    return common.gaussian_smooth_2d(tor, sigma_cells=1.1)
+    tor = common.gaussian_smooth_2d(tor, sigma_cells=1.1)
+
+    if valid_dt is not None:
+        # Build a 2-D longitude grid (broadcast over latitudes), shift
+        # to local solar hour, multiply by the diurnal weight.
+        _, lons2d = np.meshgrid(grid.lats, grid.lons, indexing="ij")
+        utc_h = valid_dt.hour + valid_dt.minute / 60.0
+        lsh = common.local_solar_hour(utc_h, lons2d)
+        tor = tor * common.diurnal_factor(lsh)
+
+    return np.clip(tor, 0.0, 1.0)
 
 
 def compute_gfs_day(grid, results, first_valid_utc, day_offset_hours,
@@ -314,8 +339,13 @@ def compute_gfs_day(grid, results, first_valid_utc, day_offset_hours,
     day_start = first_valid_utc + dt.timedelta(hours=day_offset_hours)
     indices = find_hour_indices(sample["hourly"], day_start, 24)
 
-    # Per-hour scores for all 24 hours of this day.
-    hour_fields = [score_hour(grid, results, i) for i in indices]
+    # Per-hour scores for all 24 hours of this day, with the diurnal
+    # weight applied per cell using each hour's UTC valid time.
+    hour_fields = [
+        score_hour(grid, results, idx,
+                   valid_dt=day_start + dt.timedelta(hours=h))
+        for h, idx in enumerate(indices)
+    ]
 
     hours_payload = []
     peak_fh, peak_score = 0, 0.0

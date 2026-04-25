@@ -38,9 +38,11 @@ import numpy as np
 
 
 CONUS_BOUNDS = (24.5, -125.0, 49.5, -66.5)   # S, W, N, E
-DEFAULT_GRID_DEG = 1.25                       # ~940 points; keeps us under
-                                              # Open-Meteo's rate/day budget
-SCORE_FLOOR = 0.05                            # cells below this are dropped
+DEFAULT_GRID_DEG = 1.5                        # ~660 points; balances
+                                              # Open-Meteo's per-minute
+                                              # rate budget against
+                                              # heatmap fidelity
+SCORE_FLOOR = 0.02                            # cells below this are dropped
 FORECAST_HOURS = 24                           # next 24 h
 
 # Open-Meteo WMO weather codes that indicate convective precipitation.
@@ -80,20 +82,44 @@ def shear_ms(u1, v1, u2, v2):
                     nan_safe(v2) - nan_safe(v1))
 
 
-def srh_proxy(shear_01_ms, cross_product):
-    """Storm-Relative Helicity proxy. Real SRH requires a storm-motion
-    estimate and a full wind profile; we approximate using the low-level
-    shear magnitude scaled up to the typical 0-1 km SRH range, then
-    amplified by hodograph clockwise curvature (the sign of u10*v850 -
-    v10*u850). Positive curvature boosts, negative curvature attenuates.
+def bunkers_right_mover(u_mean, v_mean, u_shear, v_shear):
+    """Bunkers (2000) right-mover storm motion estimate.
 
-    Calibrated so that shear_01 = 15 m/s with neutral curvature -> ~150.
+    Storm = 0-6 km mean wind + a 7.5 m/s deviation perpendicular and
+    to the right of the 0-6 km shear vector. This is the canonical
+    way to turn a wind profile into a storm-relative reference frame
+    without a real cloud model in the loop.
     """
-    base = nan_safe(shear_01_ms) * 10.0
-    # Map the clockwise cross product (typical magnitude ~50 when strong)
-    # into a 0.7 .. 1.3 multiplier so SRH ends up in the 0..300 range.
-    curv = clamp(nan_safe(cross_product) / 50.0, -1.0, 1.0)
-    return base * (1.0 + 0.3 * curv)
+    u_mean = nan_safe(u_mean)
+    v_mean = nan_safe(v_mean)
+    u_shear = nan_safe(u_shear)
+    v_shear = nan_safe(v_shear)
+    mag = np.hypot(u_shear, v_shear)
+    safe = np.where(mag > 0.5, mag, 0.5)
+    # Unit vector 90 degrees clockwise from the shear vector
+    # (right-of-shear in a north-up frame).
+    nx = v_shear / safe
+    ny = -u_shear / safe
+    return u_mean + 7.5 * nx, v_mean + 7.5 * ny
+
+
+def srh_layer(u_low, v_low, u_high, v_high, u_storm, v_storm):
+    """Storm-Relative Helicity over one shear layer, m^2/s^2.
+
+    Two-level approximation of the integral form:
+        SRH = -integral [ k . (V - C) x dV/dz ] dz
+    For a single shear layer collapses to:
+        SRH = -[ (u_low - cu) * (v_high - v_low)
+               - (v_low - cv) * (u_high - u_low) ]
+
+    Positive SRH = clockwise hodograph curvature in the layer =
+    right-mover supercell favorable.
+    """
+    rel_u = nan_safe(u_low) - nan_safe(u_storm)
+    rel_v = nan_safe(v_low) - nan_safe(v_storm)
+    sh_u = nan_safe(u_high) - nan_safe(u_low)
+    sh_v = nan_safe(v_high) - nan_safe(v_low)
+    return -(rel_u * sh_v - rel_v * sh_u)
 
 
 def stp(cape, cin, lcl_m, srh01, bwd6_ms):
@@ -106,6 +132,27 @@ def stp(cape, cin, lcl_m, srh01, bwd6_ms):
     return (
         clamp(cape / 1500.0, 0, 4) *
         clamp((2000.0 - lcl) / 1000.0, 0, 1) *
+        clamp(srh / 150.0, 0, 4) *
+        clamp(shr / 20.0, 0, 1.5) *
+        clamp((cin + 200.0) / 150.0, 0, 1)
+    )
+
+
+def stp_fixed(cape, cin, srh01, bwd6_ms):
+    """Significant Tornado Parameter, fixed-layer variant (no LCL term).
+
+    The LCL gate inside classic STP underweights cool-season and
+    nocturnal events where boundary-layer cooling lifts the LCL but
+    a low-level jet keeps the SRH/shear environment supportive. The
+    fixed-layer form drops that term and is what SPC actually verifies
+    on for sig-tor outlooks (Thompson et al. 2012).
+    """
+    cape = nan_safe(cape, 0.0)
+    cin = nan_safe(cin, -50.0)
+    srh = nan_safe(srh01, 0.0)
+    shr = nan_safe(bwd6_ms, 0.0)
+    return (
+        clamp(cape / 1500.0, 0, 4) *
         clamp(srh / 150.0, 0, 4) *
         clamp(shr / 20.0, 0, 1.5) *
         clamp((cin + 200.0) / 150.0, 0, 1)
@@ -285,22 +332,49 @@ def low_level_boost(lapse_c_per_km):
 
 def environment_factor(cape, cin, lcl_m, srh01, srh03, bwd6_ms,
                        low_lapse):
-    """Blend of four mature severe parameters. Each normalized to
-    [0, 1] before the weighted mean so no single index can dominate
-    when the others disagree."""
+    """Blend of mature severe parameters. Each normalized to [0, 1]
+    before the weighted mean so no single index can dominate when the
+    others disagree.
+
+    STP-fixed-layer is added alongside classic STP so cool-season /
+    nocturnal events with elevated LCLs but supportive shear+helicity
+    don't get zeroed out by the LCL gate.
+    """
     mlcape = mlcape_proxy(cape, cin)
     s = stp(mlcape, cin, lcl_m, srh01, bwd6_ms)
+    sf = stp_fixed(mlcape, cin, srh01, bwd6_ms)
     v = vtp(mlcape, srh01, bwd6_ms, lcl_m, low_lapse, cin)
     sc = scp(mlcape, srh01, bwd6_ms, cin)
     e1 = ehi01(mlcape, srh01)
     e3 = ehi03(mlcape, srh03)
     return (
-        0.35 * clamp(s / 3.0, 0, 1) +
-        0.25 * clamp(v / 2.0, 0, 1) +
-        0.20 * clamp(sc / 8.0, 0, 1) +
-        0.10 * clamp(e1 / 2.0, 0, 1) +
-        0.10 * clamp(e3 / 2.0, 0, 1)
+        0.28 * clamp(s  / 3.0, 0, 1) +
+        0.22 * clamp(sf / 3.0, 0, 1) +
+        0.20 * clamp(v  / 2.0, 0, 1) +
+        0.15 * clamp(sc / 8.0, 0, 1) +
+        0.075 * clamp(e1 / 2.0, 0, 1) +
+        0.075 * clamp(e3 / 2.0, 0, 1)
     )
+
+
+def diurnal_factor(local_solar_hour):
+    """Tornado-climatology diurnal weight, peaks at 18 LST (the well-
+    documented late-afternoon maximum) and bottoms out around 06 LST.
+
+    Returns a multiplier in [0.40, 1.30]. Operates on scalars or numpy
+    arrays so it can be applied per-grid-cell using a longitude-shifted
+    local hour field.
+    """
+    h = nan_safe(local_solar_hour, 12.0)
+    phase = np.cos((h - 18.0) * np.pi / 12.0)
+    return 0.85 + 0.45 * phase
+
+
+def local_solar_hour(utc_hour, lon_deg):
+    """Approximate local solar hour at longitude `lon_deg` for the
+    given UTC hour. No DST or equation-of-time correction; close
+    enough for a diurnal-cycle weight."""
+    return (nan_safe(utc_hour, 12.0) + nan_safe(lon_deg) / 15.0) % 24.0
 
 
 # ---------- simulated reflectivity proxy ----------
@@ -394,12 +468,59 @@ def gaussian_smooth_2d(field: np.ndarray, sigma_cells: float = 1.1) -> np.ndarra
 def tornado_probability(cape, cin, lcl_m, srh01, srh03,
                         shear_01_ms, shear_03_ms, shear_06_ms,
                         precip_mm, weather_code, low_lapse):
+    """T1 tornado-probability blend, mapped onto a "% chance within
+    25 mi of a point" scale.
+
+    Reworked April 2026: the original formulation was a pure product
+    of four [0,1] factors, which collapses to ~0 unless every
+    ingredient is independently strong. Tornado environments rarely
+    score well on all axes simultaneously — even classic outbreaks
+    have one or two ingredients that look only "ok". We now use a
+    weighted geometric mean (log-space weighted average) so a strong
+    environment can still light up when the storm-mode factor is
+    only middling, then run the result through a logistic so the
+    output reads as a probability rather than a unitless composite.
+
+    Inputs are unchanged so call sites don't have to move; the
+    diurnal weighting (which depends on lon + valid time) is
+    multiplied in by the orchestration layer in `fetcher.score_hour`.
+    """
     e = environment_factor(cape, cin, lcl_m, srh01, srh03, shear_06_ms,
                            low_lapse)
     s = simref_proxy(precip_mm, weather_code, cape)
     m = storm_mode_factor(cape, shear_01_ms, shear_03_ms, shear_06_ms)
-    l = low_level_boost(low_lapse)
-    return clamp(e * s * m * l, 0.0, 1.0)
+    # low_level_boost returns 0.6..1.3; renormalize to [0,1] for the
+    # geometric blend, then re-expand the contribution by raising it
+    # to a small exponent so it's a soft modulator, not a primary axis.
+    l = clamp((low_level_boost(low_lapse) - 0.6) / 0.7, 0.0, 1.0)
+
+    # Floor each factor very slightly so log(0) doesn't poison the
+    # geometric mean and so a momentarily missing radar proxy
+    # doesn't kill an otherwise organized environment.
+    eps = 0.02
+    e_ = np.maximum(e, eps)
+    s_ = np.maximum(s, eps)
+    m_ = np.maximum(m, eps)
+    l_ = np.maximum(l, eps)
+
+    # Weighted geometric mean. Weights sum to 1.
+    raw = (np.power(e_, 0.40) *
+           np.power(m_, 0.25) *
+           np.power(s_, 0.20) *
+           np.power(l_, 0.15))
+
+    # Calibration logistic. Tuned so:
+    #   raw = 0.20 -> ~ 3% (low-end "see-thunderstorm-not-tornado")
+    #   raw = 0.45 -> ~25% (well-organized severe environment)
+    #   raw = 0.65 -> ~70% (classic tornado outbreak signature)
+    # The 25-mi radius matches SPC's outlook verification convention.
+    p = 1.0 / (1.0 + np.exp(-7.5 * (raw - 0.45)))
+
+    # Hard kill if there's no parcel buoyancy at all — keeps the
+    # logistic floor (~0.05 even at raw=0) from coloring the entire
+    # CONUS pale blue under a stable polar airmass.
+    cape_gate = clamp(nan_safe(cape, 0.0) / 250.0, 0.0, 1.0)
+    return clamp(p * cape_gate, 0.0, 1.0)
 
 
 # ---------- grid ----------

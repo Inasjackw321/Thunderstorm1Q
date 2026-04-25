@@ -2,13 +2,22 @@ name: update-tornado-heatmap
 
 on:
   schedule:
-    # Every 5 hours at :00 UTC (00 / 05 / 10 / 15 / 20).
-    # Cron can't express a strictly uniform 5h interval inside a 24h
-    # cycle — the 20Z→00Z gap is 4h not 5h. That's acceptable for a
-    # 24–72h forecast product; nothing in the pipeline assumes even
-    # spacing.
-    - cron: '0 0,5,10,15,20 * * *'
+    # Every 12 hours at 00 / 12 UTC. GFS new cycles land at
+    # 00/06/12/18Z so this catches the 00Z and 12Z runs; HRRR
+    # updates hourly but the gain past every-12h is small for a
+    # 1-3 day public forecast product.
+    - cron: '0 0,12 * * *'
   workflow_dispatch:
+  # Re-run automatically whenever the model code or workflow itself
+  # changes, so a deploy of new physics produces fresh data
+  # immediately rather than waiting for the next cron tick.
+  push:
+    branches:
+      - main
+      - claude/thunderstorm-setup-KlAVq
+    paths:
+      - 'scripts/**'
+      - '.github/workflows/update.yml'
 
 permissions:
   contents: write
@@ -33,16 +42,12 @@ jobs:
       - name: install deps
         run: pip install -q -r scripts/requirements.txt
       - name: day 1 (HRRR, hours 1-24)
-        timeout-minutes: 8
+        timeout-minutes: 10
         run: python scripts/update_day1.py
-      - name: day 2 (GFS, 4x 6h windows)
-        timeout-minutes: 5
+      - name: days 2 + 3 (GFS, one fetch -> two day files)
+        timeout-minutes: 10
         continue-on-error: true
-        run: python scripts/update_day2.py
-      - name: day 3 (GFS, 4x 6h windows)
-        timeout-minutes: 5
-        continue-on-error: true
-        run: python scripts/update_day3.py
+        run: python scripts/update_day23.py
       - name: commit data
         run: |
           git config user.name  "tornado-bot"
