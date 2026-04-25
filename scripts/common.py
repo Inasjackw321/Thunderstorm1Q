@@ -38,8 +38,10 @@ import numpy as np
 
 
 CONUS_BOUNDS = (24.5, -125.0, 49.5, -66.5)   # S, W, N, E
-DEFAULT_GRID_DEG = 1.25                       # ~940 points; keeps us under
-                                              # Open-Meteo's rate/day budget
+DEFAULT_GRID_DEG = 1.5                        # ~660 points; balances
+                                              # Open-Meteo's per-minute
+                                              # rate budget against
+                                              # heatmap fidelity
 SCORE_FLOOR = 0.05                            # cells below this are dropped
 FORECAST_HOURS = 24                           # next 24 h
 

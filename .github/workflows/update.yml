@@ -33,16 +33,12 @@ jobs:
       - name: install deps
         run: pip install -q -r scripts/requirements.txt
       - name: day 1 (HRRR, hours 1-24)
-        timeout-minutes: 8
+        timeout-minutes: 10
         run: python scripts/update_day1.py
-      - name: day 2 (GFS, 4x 6h windows)
-        timeout-minutes: 5
+      - name: days 2 + 3 (GFS, one fetch -> two day files)
+        timeout-minutes: 10
         continue-on-error: true
-        run: python scripts/update_day2.py
-      - name: day 3 (GFS, 4x 6h windows)
-        timeout-minutes: 5
-        continue-on-error: true
-        run: python scripts/update_day3.py
+        run: python scripts/update_day23.py
       - name: commit data
         run: |
           git config user.name  "tornado-bot"

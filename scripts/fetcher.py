@@ -18,12 +18,10 @@ import dataclasses as _dc
 import datetime as dt
 import json
 import sys
-import threading
 import time
 import urllib.error
 import urllib.parse
 import urllib.request
-from concurrent.futures import ThreadPoolExecutor, as_completed
 
 import numpy as np
 
@@ -58,8 +56,12 @@ HOURLY_VARS = [
 ]
 
 BATCH_SIZE = 100             # coords per Open-Meteo call
-MAX_WORKERS = 4              # concurrent batches
+INTER_BATCH_SLEEP_S = 3.0    # gap between consecutive batches; the
+                             # free tier has a per-minute throttle,
+                             # not a per-day cap, so a tiny pause
+                             # buys us nearly 100% success
 RETRY_BACKOFF_S = [6, 18]    # ~24s worst case per batch
+RATE_LIMIT_BACKOFF_S = 65    # 429 = "minutely limit" — wait it out
 PER_REQUEST_TIMEOUT = 30     # seconds
 MAX_BATCH_ERROR_FRAC = 0.25
 
@@ -125,6 +127,13 @@ def _fetch_once(pairs, cfg: FetchConfig):
             return data
         except APIError as exc:
             last_err = exc
+            if exc.code == 429:
+                # Minutely throttle. Sleep past the next minute boundary
+                # so the next attempt starts in a fresh window.
+                print(f"  429: sleeping {RATE_LIMIT_BACKOFF_S}s for rate-limit reset",
+                      file=sys.stderr)
+                time.sleep(RATE_LIMIT_BACKOFF_S)
+                continue
             if exc.code == 400:
                 # Structural — retrying won't help. Surface to caller
                 # so the bisect path can kick in if it's "no data".
@@ -153,8 +162,13 @@ def fetch_batch(pairs, cfg: FetchConfig):
 
 
 def fetch_grid(grid, cfg: FetchConfig):
-    """Fetch the whole CONUS grid in a small thread pool. Raises if
-    too many batches fail (cached JSON keeps serving the page)."""
+    """Fetch the whole CONUS grid serially with a small inter-batch
+    pause. Open-Meteo's free tier has a per-minute throttle (not a
+    per-day cap), so concurrency triggers 429s on a CONUS-scale grid;
+    serializing with a few seconds of breathing room is the simplest
+    way to stay safely under it.
+
+    Raises if too many batches fail (cached JSON keeps serving the page)."""
     pairs = grid.flat_pairs()
     batches = [
         (start, pairs[start:start + BATCH_SIZE])
@@ -162,34 +176,23 @@ def fetch_grid(grid, cfg: FetchConfig):
     ]
     results = [None] * len(pairs)
     failures = 0
-    lock = threading.Lock()
     t0 = time.monotonic()
     print(f"{len(pairs)} grid points in {len(batches)} batches "
-          f"(workers={MAX_WORKERS}, batch={BATCH_SIZE}, "
+          f"(serial, batch={BATCH_SIZE}, sleep={INTER_BATCH_SLEEP_S}s, "
           f"models={cfg.models or 'auto'}, hours={cfg.forecast_hours})")
 
-    def _run_one(idx, start, chunk):
+    for i, (start, chunk) in enumerate(batches):
+        if i > 0:
+            time.sleep(INTER_BATCH_SLEEP_S)
         try:
             data = fetch_batch(chunk, cfg)
         except Exception as exc:
-            return idx, start, None, exc
-        return idx, start, data, None
-
-    with ThreadPoolExecutor(max_workers=MAX_WORKERS) as pool:
-        futures = [
-            pool.submit(_run_one, i, start, chunk)
-            for i, (start, chunk) in enumerate(batches)
-        ]
-        for fut in as_completed(futures):
-            idx, start, data, exc = fut.result()
-            if exc is not None:
-                with lock:
-                    failures += 1
-                print(f"  batch {idx + 1}/{len(batches)} failed: {exc!r}",
-                      file=sys.stderr)
-                continue
-            for i, point in enumerate(data):
-                results[start + i] = point
+            failures += 1
+            print(f"  batch {i + 1}/{len(batches)} failed: {exc!r}",
+                  file=sys.stderr)
+            continue
+        for k, point in enumerate(data):
+            results[start + k] = point
 
     elapsed = time.monotonic() - t0
     print(f"fetch complete in {elapsed:.1f}s "
