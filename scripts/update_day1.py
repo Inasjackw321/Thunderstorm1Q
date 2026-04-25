@@ -34,7 +34,7 @@ import numpy as np
 
 import common
 import fetcher
-from common import CONUSGrid, tornado_probability, sparse_cells
+from common import CONUSGrid, sparse_cells
 
 
 MODEL_LABEL = "T1"
@@ -64,29 +64,24 @@ def run(out_path: str, meta_path: str):
 
     for fh in range(1, common.FORECAST_HOURS + 1):
         i_src = hourly_idx[fh - 1]
+        valid_dt = first_valid + dt.timedelta(hours=fh - 1)
         if i_src is None:
             hours_payload.append({
                 "fh": fh,
-                "valid": common.isoformat(now + dt.timedelta(hours=fh)),
+                "valid": common.isoformat(valid_dt),
                 "tornado": {"cells": [], "max": 0.0},
             })
             continue
 
-        f = fetcher.extract_hour_fields(grid, results, i_src)
-        tor = tornado_probability(
-            f["cape"], f["cin"], f["lcl"], f["srh01"], f["srh03"],
-            f["s01"], f["s03"], f["s06"],
-            f["precip"], f["wc"], f["lapse"])
-        tor = common.gaussian_smooth_2d(tor, sigma_cells=1.1)
+        tor = fetcher.score_hour(grid, results, i_src, valid_dt=valid_dt)
         tor_cells = sparse_cells(grid, tor)
-
         mx_t = float(np.nanmax(tor)) if tor.size else 0.0
         if mx_t > peak_score:
             peak_fh, peak_score = fh, mx_t
 
         hours_payload.append({
             "fh": fh,
-            "valid": common.isoformat(now + dt.timedelta(hours=fh)),
+            "valid": common.isoformat(valid_dt),
             "tornado": {"cells": tor_cells, "max": round(mx_t, 3)},
         })
         print(f"[fh={fh:02d}] cells={len(tor_cells):3d}  peak={mx_t:.2f}")

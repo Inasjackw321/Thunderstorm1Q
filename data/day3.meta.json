@@ -1,1 +1,1 @@
-{"source":"Thunderstorm1Q \u2014 T1 (GFS \u00b7 6h max windows \u00b7 \u00d70.70 skill)","model":"T1","generated_at":"2026-04-25T14:06:49Z","peaks":{"tornado":{"fh":1,"score":0.325}},"next_update":"2026-04-25T19:06:49Z","seeded":false,"updated_at":"2026-04-25T14:11:46Z"}
+{"source":"Thunderstorm1Q \u2014 seed (awaiting first Actions run)","model":"T1","generated_at":"2026-04-25T14:32:01Z","peaks":{"tornado":{"fh":0,"score":0.0}},"next_update":"2026-04-25T15:32:01Z","seeded":true,"updated_at":"2026-04-25T14:32:01Z"}

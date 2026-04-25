@@ -247,10 +247,17 @@ def derive_fields(point_hourly, hour_idx):
     shear_01 = common.shear_ms(u10, v10, u85, v85)
     shear_03 = common.shear_ms(u10, v10, u70, v70)
     shear_06 = common.shear_ms(u10, v10, u50, v50)
-    cross01 = u10 * v85 - v10 * u85
-    cross03 = u10 * v70 - v10 * u70
-    srh01 = common.srh_proxy(shear_01, cross01)
-    srh03 = common.srh_proxy(shear_03, cross03) * 1.25
+
+    # Bunkers right-mover storm motion -> true layer SRH instead of
+    # the older cross-product proxy. The 0-6 km mean is approximated
+    # by averaging the four wind levels we have (10 m / 850 / 700 /
+    # 500 hPa); the deep-layer shear vector is 500 hPa - 10 m.
+    u_mean = 0.25 * (u10 + u85 + u70 + u50)
+    v_mean = 0.25 * (v10 + v85 + v70 + v50)
+    cu, cv = common.bunkers_right_mover(u_mean, v_mean,
+                                        u50 - u10, v50 - v10)
+    srh01 = common.srh_layer(u10, v10, u85, v85, cu, cv)
+    srh03 = common.srh_layer(u10, v10, u70, v70, cu, cv)
     lcl = common.lcl_height_m(t2, td2)
     low_lapse = common.low_level_lapse_rate(t2, t85)
 
@@ -281,10 +288,15 @@ def find_hour_indices(sample_hourly, first_valid_utc, n_hours):
     return indices
 
 
-def score_hour(grid, results, src_idx):
+def score_hour(grid, results, src_idx, valid_dt=None):
     """Run one forecast hour through the physics blend and return the
     smoothed 2-D tornado-probability field. Returns a zero field if
-    the hour is missing from the Open-Meteo response."""
+    the hour is missing from the Open-Meteo response.
+
+    If `valid_dt` is supplied, applies the per-cell diurnal-climatology
+    weight (peaks late afternoon LST, troughs around dawn) so the
+    nocturnal CONUS doesn't show the same risk as a 5pm warm sector.
+    """
     if src_idx is None:
         return np.zeros(grid.shape, dtype=np.float64)
     f = extract_hour_fields(grid, results, src_idx)
@@ -292,7 +304,17 @@ def score_hour(grid, results, src_idx):
         f["cape"], f["cin"], f["lcl"], f["srh01"], f["srh03"],
         f["s01"], f["s03"], f["s06"],
         f["precip"], f["wc"], f["lapse"])
-    return common.gaussian_smooth_2d(tor, sigma_cells=1.1)
+    tor = common.gaussian_smooth_2d(tor, sigma_cells=1.1)
+
+    if valid_dt is not None:
+        # Build a 2-D longitude grid (broadcast over latitudes), shift
+        # to local solar hour, multiply by the diurnal weight.
+        _, lons2d = np.meshgrid(grid.lats, grid.lons, indexing="ij")
+        utc_h = valid_dt.hour + valid_dt.minute / 60.0
+        lsh = common.local_solar_hour(utc_h, lons2d)
+        tor = tor * common.diurnal_factor(lsh)
+
+    return np.clip(tor, 0.0, 1.0)
 
 
 def compute_gfs_day(grid, results, first_valid_utc, day_offset_hours,
@@ -317,8 +339,13 @@ def compute_gfs_day(grid, results, first_valid_utc, day_offset_hours,
     day_start = first_valid_utc + dt.timedelta(hours=day_offset_hours)
     indices = find_hour_indices(sample["hourly"], day_start, 24)
 
-    # Per-hour scores for all 24 hours of this day.
-    hour_fields = [score_hour(grid, results, i) for i in indices]
+    # Per-hour scores for all 24 hours of this day, with the diurnal
+    # weight applied per cell using each hour's UTC valid time.
+    hour_fields = [
+        score_hour(grid, results, idx,
+                   valid_dt=day_start + dt.timedelta(hours=h))
+        for h, idx in enumerate(indices)
+    ]
 
     hours_payload = []
     peak_fh, peak_score = 0, 0.0

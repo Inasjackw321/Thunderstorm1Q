@@ -19,7 +19,7 @@
   const BAR_SCALE  = 0.6;      // matches HEAT_MAX so bars feel the heat.
 
   const POLL_MS = 5 * 60 * 1000;
-  const STALE_MIN = 330;       // 5h cron + a grace period; anything older is "stale"
+  const STALE_MIN = 840;       // 12h cron + a 2h grace period; anything older is "stale"
 
   // Per-day metadata. `bars` is authoritative for the sparkline division
   // count; `fh` labels in tooltips match the data file's `hours[].fh`.

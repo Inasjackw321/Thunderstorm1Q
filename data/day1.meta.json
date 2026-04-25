@@ -1,1 +1,1 @@
-{"source":"Thunderstorm1Q \u2014 T1","model":"T1","generated_at":"2026-04-25T14:04:30Z","peaks":{"tornado":{"fh":8,"score":0.129}},"next_update":"2026-04-25T19:04:30Z","batch_failures":0,"batch_total":8,"seeded":false,"updated_at":"2026-04-25T14:06:49Z"}
+{"source":"Thunderstorm1Q \u2014 seed (awaiting first Actions run)","model":"T1","generated_at":"2026-04-25T14:32:01Z","peaks":{"tornado":{"fh":0,"score":0.0}},"next_update":"2026-04-25T15:32:01Z","seeded":true,"updated_at":"2026-04-25T14:32:01Z"}
