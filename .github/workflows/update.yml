@@ -1,0 +1,63 @@
+name: update-tornado-heatmap
+
+on:
+  schedule:
+    # Every 5 hours at :00 UTC (00 / 05 / 10 / 15 / 20).
+    # Cron can't express a strictly uniform 5h interval inside a 24h
+    # cycle — the 20Z→00Z gap is 4h not 5h. That's acceptable for a
+    # 24–72h forecast product; nothing in the pipeline assumes even
+    # spacing.
+    - cron: '0 0,5,10,15,20 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: tornado-heatmap
+  # Let queued runs finish instead of killing mid-fetch — the whole
+  # batch is wasted if we cancel on the last retry.
+  cancel-in-progress: false
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    timeout-minutes: 18
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: 'pip'
+          cache-dependency-path: scripts/requirements.txt
+      - name: install deps
+        run: pip install -q -r scripts/requirements.txt
+      - name: day 1 (HRRR, hours 1-24)
+        timeout-minutes: 8
+        run: python scripts/update_day1.py
+      - name: day 2 (GFS, 4x 6h windows)
+        timeout-minutes: 5
+        continue-on-error: true
+        run: python scripts/update_day2.py
+      - name: day 3 (GFS, 4x 6h windows)
+        timeout-minutes: 5
+        continue-on-error: true
+        run: python scripts/update_day3.py
+      - name: commit data
+        run: |
+          git config user.name  "tornado-bot"
+          git config user.email "tornado-bot@users.noreply.github.com"
+          git add data/day1.json data/day1.meta.json \
+                  data/day2.json data/day2.meta.json \
+                  data/day3.json data/day3.meta.json
+          if git diff --cached --quiet; then
+            echo "no data changes"
+          else
+            git commit -m "data: $(date -u +%FT%TZ)"
+            # Retry pushes so the job survives transient network blips.
+            for i in 1 2 3 4; do
+              if git push; then exit 0; fi
+              sleep $((2 ** i))
+            done
+            exit 1
+          fi

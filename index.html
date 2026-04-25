@@ -1,0 +1,120 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Thunderstorm1Q — T1 tornado risk</title>
+<meta name="description" content="Thunderstorm1Q — 3-day CONUS tornado risk map powered by the T1 model. HRRR-backed hours 1–24 plus GFS-backed Day 2 and Day 3, refreshed every 5 hours." />
+<meta http-equiv="Content-Security-Policy" content="
+  default-src 'self';
+  script-src 'self' https://unpkg.com;
+  style-src 'self' 'unsafe-inline' https://unpkg.com https://fonts.googleapis.com;
+  font-src https://fonts.gstatic.com;
+  img-src 'self' data: https: blob:;
+  connect-src 'self' https://*.basemaps.cartocdn.com;">
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@500;600&display=swap" />
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+      integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY="
+      crossorigin="" />
+<link rel="stylesheet" href="css/heatmap.css" />
+</head>
+<body>
+
+<main class="map-wrap">
+  <div id="map"></div>
+</main>
+
+<header class="brand-strip">
+  <a class="brand" href="#" aria-label="Thunderstorm1Q home">
+    <svg class="mark" viewBox="0 0 40 40" width="18" height="18" aria-hidden="true">
+      <defs>
+        <linearGradient id="bolt-g" x1="0" y1="0" x2="1" y2="1">
+          <stop offset="0%"  stop-color="#38bdf8"/>
+          <stop offset="55%" stop-color="#a78bfa"/>
+          <stop offset="100%" stop-color="#ec4899"/>
+        </linearGradient>
+      </defs>
+      <path d="M22 6 L10 22 H18 L16 34 L30 16 H22 Z" fill="url(#bolt-g)"/>
+    </svg>
+    <span class="b-title">Thunderstorm<span class="accent">1Q</span></span>
+    <span class="b-sep">&middot;</span>
+    <span class="b-model">T1</span>
+    <span class="b-sep">&middot;</span>
+    <span class="b-sub">Tornado Risk</span>
+  </a>
+</header>
+
+<aside class="legend-rail" aria-label="Probability legend">
+  <div class="rail-ticks" aria-hidden="true">
+    <span>90%</span><span>70%</span><span>50%</span><span>30%</span><span>10%</span>
+  </div>
+  <div class="rail-bar" aria-hidden="true"></div>
+</aside>
+
+<section class="readout" aria-label="Current hour readout">
+  <div class="ro-head">
+    <svg class="tor-glyph" viewBox="0 0 24 24" width="14" height="14" aria-hidden="true">
+      <path d="M3 4 Q12 6 21 4 L18 10 Q12 11 6 10 Z M6 11 Q12 12 18 11 L15.5 16 Q12 16.5 8.5 16 Z M8.5 17 Q12 17.3 15.5 17 L13.5 20 Q12 20.2 10.5 20 Z"
+            fill="currentColor"/>
+    </svg>
+    <span class="ro-kicker">Tornado</span>
+    <span class="ro-tz" title="Times shown in UTC / Zulu">UTC</span>
+  </div>
+  <div class="ro-pct" id="ro-pct">&mdash;</div>
+  <div class="ro-date" id="ro-date">&mdash;</div>
+  <div class="ro-time" id="ro-time">&mdash;</div>
+  <div class="ro-divider" aria-hidden="true"></div>
+  <div class="ro-status" id="ro-status">
+    <span class="ro-dot"></span>
+    <span class="ro-status-text" id="ro-status-text">loading</span>
+  </div>
+</section>
+
+<div id="state-banner" class="banner" hidden></div>
+
+<footer class="timeline" aria-label="Forecast timeline">
+  <div class="day-pills" id="day-pills" role="tablist" aria-label="Forecast day">
+    <button class="pill" role="tab" data-day="1" aria-selected="true"
+            title="Hours 1-24 (HRRR) — press 1">1-24h</button>
+    <button class="pill" role="tab" data-day="2" aria-selected="false"
+            title="Day 2, 6-hour max windows (GFS) — press 2">Day 2</button>
+    <button class="pill" role="tab" data-day="3" aria-selected="false"
+            title="Day 3, 6-hour max windows (GFS) — press 3">Day 3</button>
+  </div>
+
+  <div class="t-ctrls">
+    <button id="prev" class="t-btn" title="Previous frame (←)" aria-label="Previous frame">&#9664;</button>
+    <button id="play" class="t-btn t-play" title="Play / pause (Space)" aria-label="Play animation">&#9654;</button>
+    <button id="peak" class="t-btn" title="Jump to peak (P)" aria-label="Jump to peak frame">&#9650;</button>
+    <button id="next" class="t-btn" title="Next frame (→)" aria-label="Next frame">&#9654;</button>
+  </div>
+
+  <div class="spark-wrap">
+    <div class="spark" id="spark" role="slider"
+         aria-label="Forecast frame"
+         aria-valuemin="1" aria-valuemax="24" aria-valuenow="1"
+         tabindex="0">
+      <div class="spark-bars" id="spark-bars"></div>
+      <div class="spark-head" id="spark-head" aria-hidden="true"></div>
+      <div class="spark-tip" id="spark-tip" role="tooltip" aria-hidden="true">
+        <span class="tip-fh" id="tip-fh">F01</span>
+        <span class="tip-pct" id="tip-pct">0%</span>
+      </div>
+    </div>
+    <div class="spark-axis" id="spark-axis" aria-hidden="true">
+      <span>now</span><span>+6h</span><span>+12h</span><span>+18h</span><span>+24h</span>
+    </div>
+  </div>
+
+  <div class="t-now" id="hour-label">&mdash;</div>
+</footer>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+        integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo="
+        crossorigin=""></script>
+<script src="https://unpkg.com/leaflet.heat@0.2.0/dist/leaflet-heat.js"></script>
+<script src="js/heatmap.js"></script>
+</body>
+</html>
