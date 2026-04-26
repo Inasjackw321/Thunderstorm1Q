@@ -328,7 +328,7 @@ html, body {
   box-shadow: 0 0 0 1px rgba(239, 68, 68, 0.65);
 }
 
-/* Radar toggle — sits at the right end of the timeline. */
+/* Pill-style toggle (Draw, etc.) — sits at the end of the timeline. */
 .toggle {
   display: inline-flex; align-items: center; gap: 6px;
   flex: none;
@@ -377,6 +377,39 @@ html, body {
   color: var(--muted);
 }
 .toggle input:checked ~ .toggle-label { color: var(--fg); }
+
+/* Small icon buttons that live in the timeline alongside .toggle. */
+.icon-btn {
+  flex: none;
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 26px; height: 22px;
+  padding: 0;
+  background: rgba(120, 140, 190, 0.08);
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  color: var(--muted);
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 1;
+  cursor: pointer;
+  transition: color 140ms var(--ease),
+              background 140ms var(--ease),
+              border-color 140ms var(--ease);
+}
+.icon-btn:hover {
+  color: var(--fg);
+  border-color: var(--line-2);
+  background: rgba(120, 140, 190, 0.14);
+}
+.icon-btn:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 1px rgba(239, 68, 68, 0.55);
+}
+.icon-btn.loading { opacity: 0.55; pointer-events: none; }
+
+/* Drawing-mode cursor: crosshair instead of the default pointer
+   so it's obvious when the click+drag will draw vs probe. */
+body.drawing .leaflet-container { cursor: crosshair !important; }
 
 .spark-wrap {
   flex: 1;

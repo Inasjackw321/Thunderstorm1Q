@@ -45,6 +45,12 @@
   const mapTip    = document.getElementById('map-tip');
   const mapTipPct = document.getElementById('map-tip-pct');
   const mapTipCrd = document.getElementById('map-tip-coord');
+  const drawToggle = document.getElementById('draw-toggle');
+  const clearBtn   = document.getElementById('clear-btn');
+  const locateBtn  = document.getElementById('locate-btn');
+
+  // CONUS bounds — same box the model is gridded over.
+  const CONUS = { s: 24.5, w: -125.0, n: 49.5, e: -66.5 };
 
   // Per-day datasets / metas, keyed 1..3. `null` until the first load.
   const datasets = { 1: null, 2: null, 3: null };
@@ -84,27 +90,6 @@
     pane: 'shadowPane', maxZoom: 18, subdomains: 'abcd',
   }).addTo(map);
 
-  // Live NEXRAD base reflectivity composite from Iowa Environmental
-  // Mesonet, refreshed every ~5 min. Held in a separate pane between
-  // the basemap labels and the heatlayer so labels stay readable and
-  // the tornado heat sits on top of the radar echoes.
-  map.createPane('radar');
-  map.getPane('radar').style.zIndex = 350;
-  const radarLayer = L.tileLayer(
-    'https://mesonet.agron.iastate.edu/cache/tile.py/1.0.0/nexrad-n0q-900913/{z}/{x}/{y}.png',
-    {
-      pane: 'radar',
-      opacity: 0.55,
-      maxZoom: 18,
-      attribution: 'Radar: <a href="https://mesonet.agron.iastate.edu/" target="_blank" rel="noopener">IEM</a> NEXRAD',
-    });
-  const radarToggle = document.getElementById('radar-toggle');
-  if (radarToggle) {
-    radarToggle.addEventListener('change', () => {
-      if (radarToggle.checked) radarLayer.addTo(map);
-      else map.removeLayer(radarLayer);
-    });
-  }
 
   spark.addEventListener('keydown', onSparkKey);
   spark.addEventListener('pointerdown', onSparkPointerDown);
@@ -407,6 +392,13 @@
   }
 
   function onMapMove(e) {
+    if (drawing) {
+      // While drawing, extend the active polyline and skip the
+      // hover probe so the tooltip doesn't fight the cursor.
+      if (activePath) extendDraw(e.latlng);
+      hideMapTip();
+      return;
+    }
     if (!mapTip) return;
     const v = valueAtLatLon(e.latlng.lat, e.latlng.lng);
     if (v == null) { hideMapTip(); return; }
@@ -419,6 +411,124 @@
   function hideMapTip() {
     if (mapTip) mapTip.classList.remove('show');
   }
+
+  // ---------- freehand drawing ----------
+
+  // While drawing mode is on, pointer-down starts a new polyline,
+  // pointer-move appends vertices, pointer-up finalizes the segment.
+  // Each completed line is kept in `drawnPaths` so the clear button
+  // can wipe the whole sketch with one click.
+  let drawing = false;
+  let activePath = null;
+  const drawnPaths = [];
+
+  function setDrawing(on) {
+    drawing = !!on;
+    if (drawToggle) drawToggle.checked = drawing;
+    document.body.classList.toggle('drawing', drawing);
+    if (!drawing) endDraw();
+    hideMapTip();
+  }
+  function startDraw(latlng) {
+    activePath = L.polyline([latlng], {
+      color: '#ef4444',
+      weight: 3,
+      opacity: 0.92,
+      lineCap: 'round',
+      lineJoin: 'round',
+    }).addTo(map);
+    drawnPaths.push(activePath);
+    updateClearVisibility();
+  }
+  function extendDraw(latlng) {
+    if (activePath) activePath.addLatLng(latlng);
+  }
+  function endDraw() {
+    activePath = null;
+  }
+  function clearDrawings() {
+    while (drawnPaths.length) map.removeLayer(drawnPaths.pop());
+    activePath = null;
+    updateClearVisibility();
+  }
+  function updateClearVisibility() {
+    if (clearBtn) clearBtn.hidden = drawnPaths.length === 0;
+  }
+
+  if (drawToggle) {
+    drawToggle.addEventListener('change', () => setDrawing(drawToggle.checked));
+  }
+  if (clearBtn) clearBtn.addEventListener('click', clearDrawings);
+
+  map.on('mousedown', (e) => { if (drawing) startDraw(e.latlng); });
+  map.on('mouseup',  endDraw);
+  // While drawing, hijack the existing mousemove handler to append
+  // points instead of (or in addition to) showing the probe tooltip.
+  // Done by checking `drawing` inside onMapMove; that handler already
+  // exists and runs on every map mousemove.
+
+  // ---------- geolocation (CONUS-gated) ----------
+
+  let locateMarker = null;
+  let locateRing   = null;
+
+  function inCONUS(lat, lon) {
+    return lat >= CONUS.s && lat <= CONUS.n &&
+           lon >= CONUS.w && lon <= CONUS.e;
+  }
+  function clearLocate() {
+    if (locateMarker) { map.removeLayer(locateMarker); locateMarker = null; }
+    if (locateRing)   { map.removeLayer(locateRing);   locateRing = null; }
+  }
+  function dropLocateMarker(lat, lon) {
+    clearLocate();
+    locateRing = L.circle([lat, lon], {
+      radius: 35000,             // ~35 km halo
+      color: '#38bdf8',
+      fillColor: '#38bdf8',
+      fillOpacity: 0.10,
+      weight: 1,
+    }).addTo(map);
+    locateMarker = L.circleMarker([lat, lon], {
+      radius: 6,
+      color: '#0b1226',
+      weight: 2,
+      fillColor: '#38bdf8',
+      fillOpacity: 1,
+    }).addTo(map);
+  }
+  function locate() {
+    if (!('geolocation' in navigator)) {
+      showBanner('error', 'Geolocation is not supported in this browser.');
+      return;
+    }
+    if (locateBtn) locateBtn.classList.add('loading');
+    navigator.geolocation.getCurrentPosition(
+      (pos) => {
+        if (locateBtn) locateBtn.classList.remove('loading');
+        const lat = pos.coords.latitude;
+        const lon = pos.coords.longitude;
+        if (!inCONUS(lat, lon)) {
+          clearLocate();
+          showBanner('stale',
+            'You are outside the CONUS forecast area — no marker added.');
+          setTimeout(hideBanner, 3500);
+          return;
+        }
+        dropLocateMarker(lat, lon);
+        hideBanner();
+      },
+      (err) => {
+        if (locateBtn) locateBtn.classList.remove('loading');
+        const msg = err && err.code === err.PERMISSION_DENIED
+          ? 'Location permission denied.'
+          : 'Could not get your location.';
+        showBanner('error', msg);
+        setTimeout(hideBanner, 3500);
+      },
+      { enableHighAccuracy: false, timeout: 8000, maximumAge: 60000 });
+  }
+  if (locateBtn) locateBtn.addEventListener('click', locate);
 
   function tintReadout(mx) {
     if (!roPct) return;
