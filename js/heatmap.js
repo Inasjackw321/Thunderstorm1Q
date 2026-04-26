@@ -84,6 +84,28 @@
     pane: 'shadowPane', maxZoom: 18, subdomains: 'abcd',
   }).addTo(map);
 
+  // Live NEXRAD base reflectivity composite from Iowa Environmental
+  // Mesonet, refreshed every ~5 min. Held in a separate pane between
+  // the basemap labels and the heatlayer so labels stay readable and
+  // the tornado heat sits on top of the radar echoes.
+  map.createPane('radar');
+  map.getPane('radar').style.zIndex = 350;
+  const radarLayer = L.tileLayer(
+    'https://mesonet.agron.iastate.edu/cache/tile.py/1.0.0/nexrad-n0q-900913/{z}/{x}/{y}.png',
+    {
+      pane: 'radar',
+      opacity: 0.55,
+      maxZoom: 18,
+      attribution: 'Radar: <a href="https://mesonet.agron.iastate.edu/" target="_blank" rel="noopener">IEM</a> NEXRAD',
+    });
+  const radarToggle = document.getElementById('radar-toggle');
+  if (radarToggle) {
+    radarToggle.addEventListener('change', () => {
+      if (radarToggle.checked) radarLayer.addTo(map);
+      else map.removeLayer(radarLayer);
+    });
+  }
+
   spark.addEventListener('keydown', onSparkKey);
   spark.addEventListener('pointerdown', onSparkPointerDown);
   spark.addEventListener('pointermove', onSparkHover);
