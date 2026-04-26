@@ -91,10 +91,6 @@
   }));
   window.addEventListener('keydown', onKey);
 
-  buildSpark(totalFrames);
-  loadAll();
-  setInterval(pollForUpdate, POLL_MS);
-
   // ---------- sparkline ----------
 
   // Palette stops keyed to normalised probability (v / BAR_SCALE).
@@ -146,6 +142,10 @@
     spark.setAttribute('aria-valuemin', '1');
     spark.setAttribute('aria-valuemax', String(n));
   }
+
+  buildSpark(totalFrames);
+  loadAll();
+  setInterval(pollForUpdate, POLL_MS);
 
   function paintSpark() {
     const d = datasets[currentDay];
