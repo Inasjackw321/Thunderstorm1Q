@@ -4,27 +4,22 @@ No GRIB or model-specific dependencies: the live data pipeline pulls
 from the Open-Meteo JSON API (see `update_day1.py`), so every value
 we operate on here arrives as a plain Python float or numpy array.
 
-Blend:
+Output convention matches SPC tornado outlooks: probability of a
+tornado within 25 mi of a point during the valid hour, scaled so that
+the standard SPC categorical thresholds (2 / 5 / 10 / 15 / 30 / 45 %)
+fall in the right places. Calibration is anchored to STP-fixed
+(Thompson et al. 2012), the parameter SPC verifies its sig-tor
+outlooks against, with multiplicative gates for actual storm
+coverage and storm mode.
 
-    P_tor(cell, hour) = E x S x M x L
+    P_tor = P_env(STP_fixed)  ×  P_storms(precip, WMO code, CAPE)
+                              ×  M_mode(shear, CAPE)
+                              ×  M_lapse(low-level lapse rate)
+                              ×  cape_gate
 
-where
-  E  environment factor — blended from STP (Thompson 2003), SCP
-     (Supercell Composite), EHI 0-1 km and 0-3 km, VTP-style violent-
-     tornado weighting, and a CIN-penalized MLCAPE proxy.
-  S  simulated-reflectivity proxy from precipitation + WMO thunderstorm
-     code + CAPE.
-  M  storm-mode weight from 0-1 km, 0-3 km, and 0-6 km shear combined
-     with CAPE (discrete supercell / QLCS / multicell / none), Thompson
-     & Smith 2012-style.
-  L  low-level boost from surface-to-850 hPa lapse rate, because steep
-     low-level lapse rates favor tornadogenesis even with modest CAPE.
-
-After the per-cell blend we run a light 2-D spatial smoother so a
-single noisy grid point can't spike the display; tornado environments
-are organized on 50-150 km scales.
-
-Each factor is normalized to [0, 1]. Output is clipped to [0, 1].
+Each factor is in [0, 1]. The product is then clipped to [0, 1]. A
+small spatial Gaussian smooth is applied downstream in `fetcher.
+score_hour` to damp grid-point noise without blurring real boundaries.
 """
 from __future__ import annotations
 
@@ -468,59 +463,63 @@ def gaussian_smooth_2d(field: np.ndarray, sigma_cells: float = 1.1) -> np.ndarra
 def tornado_probability(cape, cin, lcl_m, srh01, srh03,
                         shear_01_ms, shear_03_ms, shear_06_ms,
                         precip_mm, weather_code, low_lapse):
-    """T1 tornado-probability blend, mapped onto a "% chance within
-    25 mi of a point" scale.
+    """T1 tornado probability — % chance of a tornado within 25 mi of
+    a point during the valid hour, calibrated to SPC outlook scales.
 
-    Reworked April 2026: the original formulation was a pure product
-    of four [0,1] factors, which collapses to ~0 unless every
-    ingredient is independently strong. Tornado environments rarely
-    score well on all axes simultaneously — even classic outbreaks
-    have one or two ingredients that look only "ok". We now use a
-    weighted geometric mean (log-space weighted average) so a strong
-    environment can still light up when the storm-mode factor is
-    only middling, then run the result through a logistic so the
-    output reads as a probability rather than a unitless composite.
+    Anchor: fixed-layer STP (Thompson et al. 2012, the parameter SPC
+    verifies its sig-tor outlooks against). The probability mapping
+    below was fit so the output matches SPC categorical thresholds:
 
-    Inputs are unchanged so call sites don't have to move; the
-    diurnal weighting (which depends on lon + valid time) is
-    multiplied in by the orchestration layer in `fetcher.score_hour`.
+        STP_f =   0  →   0 %      (no signal)
+        STP_f =   1  →   ~6 %     (slight risk)
+        STP_f =   2  →  ~11 %     (enhanced)
+        STP_f =   4  →  ~19 %     (moderate)
+        STP_f =   8  →  ~31 %     (high)
+        STP_f =  12+ →  ~38 %     (extreme outbreak ceiling, ~45 % cap)
+
+    The environment ceiling is then attenuated multiplicatively by:
+
+      P_storms — actual convective coverage (precip + WMO thunderstorm
+                 code + CAPE). Without storms, even a perfect supercell
+                 environment produces zero tornadoes.
+      M_mode   — Thompson & Smith 2012 mode classifier, mapped to
+                 [0.5, 1.0] so QLCS / multicell environments are
+                 modulated but not zeroed.
+      M_lapse  — low-level lapse-rate boost, [0.85, 1.15].
+      cape_gate— hard kill below 250 J/kg of buoyancy.
+
+    The diurnal-climatology weight (peaks ~18 LST) is applied in
+    `fetcher.score_hour` after this function returns.
     """
-    e = environment_factor(cape, cin, lcl_m, srh01, srh03, shear_06_ms,
-                           low_lapse)
-    s = simref_proxy(precip_mm, weather_code, cape)
-    m = storm_mode_factor(cape, shear_01_ms, shear_03_ms, shear_06_ms)
-    # low_level_boost returns 0.6..1.3; renormalize to [0,1] for the
-    # geometric blend, then re-expand the contribution by raising it
-    # to a small exponent so it's a soft modulator, not a primary axis.
-    l = clamp((low_level_boost(low_lapse) - 0.6) / 0.7, 0.0, 1.0)
+    # Fixed-layer STP, surface-based with CIN penalty. STP is already
+    # normalized so cells with weak CAPE or shear or SRH come out near
+    # zero, and a "classic outbreak" environment scores ~5-15.
+    mlcape = mlcape_proxy(cape, cin)
+    stp_f = stp_fixed(mlcape, cin, srh01, shear_06_ms)
 
-    # Floor each factor very slightly so log(0) doesn't poison the
-    # geometric mean and so a momentarily missing radar proxy
-    # doesn't kill an otherwise organized environment.
-    eps = 0.02
-    e_ = np.maximum(e, eps)
-    s_ = np.maximum(s, eps)
-    m_ = np.maximum(m, eps)
-    l_ = np.maximum(l, eps)
+    # Environment-only ceiling: saturating exponential.
+    #   P_env = P_max * (1 - exp(-STP_f / k))
+    # P_max = 0.45 (SPC HIGH risk top), k = 5 fits the calibration
+    # table above. STP_f ≥ ~25 effectively saturates.
+    p_env = 0.45 * (1.0 - np.exp(-clamp(stp_f, 0.0, 30.0) / 5.0))
 
-    # Weighted geometric mean. Weights sum to 1.
-    raw = (np.power(e_, 0.40) *
-           np.power(m_, 0.25) *
-           np.power(s_, 0.20) *
-           np.power(l_, 0.15))
+    # Storm-coverage gate: requires actual convection in the cell.
+    # simref_proxy returns ~0 for dry air even when CAPE is high.
+    p_storms = simref_proxy(precip_mm, weather_code, cape)
 
-    # Calibration logistic. Tuned so:
-    #   raw = 0.20 -> ~ 3% (low-end "see-thunderstorm-not-tornado")
-    #   raw = 0.45 -> ~25% (well-organized severe environment)
-    #   raw = 0.65 -> ~70% (classic tornado outbreak signature)
-    # The 25-mi radius matches SPC's outlook verification convention.
-    p = 1.0 / (1.0 + np.exp(-7.5 * (raw - 0.45)))
+    # Storm-mode multiplier in [0.5, 1.0] — supercell-favored.
+    mode = storm_mode_factor(cape, shear_01_ms, shear_03_ms, shear_06_ms)
+    m_mode = 0.5 + 0.5 * mode
 
-    # Hard kill if there's no parcel buoyancy at all — keeps the
-    # logistic floor (~0.05 even at raw=0) from coloring the entire
-    # CONUS pale blue under a stable polar airmass.
+    # Low-level lapse-rate booster in [0.85, 1.15].
+    lapse = nan_safe(low_lapse, 6.5)
+    m_lapse = 0.85 + 0.30 * smoothstep((lapse - 5.5) / 3.0)
+
+    # Hard kill below 250 J/kg of MLCAPE-equivalent buoyancy.
     cape_gate = clamp(nan_safe(cape, 0.0) / 250.0, 0.0, 1.0)
-    return clamp(p * cape_gate, 0.0, 1.0)
+
+    return clamp(p_env * p_storms * m_mode * m_lapse * cape_gate,
+                 0.0, 1.0)
 
 
 # ---------- grid ----------
