@@ -42,6 +42,9 @@
   const banner    = document.getElementById('state-banner');
   const pillsEl   = document.getElementById('day-pills');
   const pillEls   = Array.from(pillsEl.querySelectorAll('.pill'));
+  const mapTip    = document.getElementById('map-tip');
+  const mapTipPct = document.getElementById('map-tip-pct');
+  const mapTipCrd = document.getElementById('map-tip-coord');
 
   // Per-day datasets / metas, keyed 1..3. `null` until the first load.
   const datasets = { 1: null, 2: null, 3: null };
@@ -90,6 +93,9 @@
     if (n && n !== currentDay) switchDay(n);
   }));
   window.addEventListener('keydown', onKey);
+
+  map.on('mousemove', onMapMove);
+  map.on('mouseout',  hideMapTip);
 
   // ---------- sparkline ----------
 
@@ -346,6 +352,50 @@
     setLabel(roPct,  (mx * 100).toFixed(0) + '%');
     setLabel(roTime, fmtDate(validIso) + ' · ' + fmtHour(validIso));
     tintReadout(mx);
+  }
+
+  // ---------- map cursor probe ----------
+
+  // Look up the per-cell tornado probability at (lat, lon) for the
+  // currently displayed day + frame. Cells in data/day*.json are
+  // sparse (anything below SCORE_FLOOR is dropped) so a cell-not-found
+  // means "below the model's reporting threshold", not "no data".
+  function valueAtLatLon(lat, lon) {
+    const d = datasets[currentDay];
+    if (!d) return null;
+    const hours = d.hours || [];
+    const rec = hours.find(h => h.fh === currentFh) || hours[currentFh - 1];
+    if (!rec) return null;
+    const cells = tornadoRec(rec).cells || [];
+    const grid = d.grid_deg || 1.5;
+    const half = grid * 0.55;
+    for (let i = 0; i < cells.length; i++) {
+      const c = cells[i];
+      if (Math.abs(c[0] - lat) <= half && Math.abs(c[1] - lon) <= half) {
+        return c[2];
+      }
+    }
+    return 0;
+  }
+
+  function fmtLatLon(lat, lon) {
+    const ns = lat >= 0 ? 'N' : 'S';
+    const ew = lon >= 0 ? 'E' : 'W';
+    return `${Math.abs(lat).toFixed(1)}°${ns}  ${Math.abs(lon).toFixed(1)}°${ew}`;
+  }
+
+  function onMapMove(e) {
+    if (!mapTip) return;
+    const v = valueAtLatLon(e.latlng.lat, e.latlng.lng);
+    if (v == null) { hideMapTip(); return; }
+    mapTipPct.textContent = v > 0 ? (v * 100).toFixed(0) + '%' : '<2%';
+    if (mapTipCrd) mapTipCrd.textContent = fmtLatLon(e.latlng.lat, e.latlng.lng);
+    const cp = e.containerPoint;
+    mapTip.style.transform = `translate(${cp.x + 14}px, ${cp.y + 14}px)`;
+    mapTip.classList.add('show');
+  }
+  function hideMapTip() {
+    if (mapTip) mapTip.classList.remove('show');
   }
 
   function tintReadout(mx) {

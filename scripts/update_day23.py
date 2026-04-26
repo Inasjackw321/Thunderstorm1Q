@@ -57,7 +57,7 @@ def _write_day(out_path, meta_path, now, hours_payload, peaks, attenuation):
         model=MODEL_LABEL,
         generated_at=payload["generated_at"],
         peaks=peaks,
-        next_update=common.isoformat(now + dt.timedelta(hours=5)),
+        next_update=common.isoformat(now + dt.timedelta(hours=12)),
         seeded=False,
     )
     print(f"OK: wrote {out_path}  (peak win{peaks['tornado']['fh']}"

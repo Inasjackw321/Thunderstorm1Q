@@ -1,11 +1,12 @@
 """Thunderstorm1Q — T1 Day-1 (hours 1–24) tornado-probability updater.
 
-Runs on a GitHub Actions cron every 5 hours. Pulls CAPE, CIN, surface
-and 850 hPa temperature/dewpoint, and wind at 10 m / 850 hPa / 700 hPa
-/ 500 hPa from the Open-Meteo forecast API for a ~1.25 degree CONUS
-grid, computes the multi-parameter environment x simref-proxy x
-storm-mode x lapse-rate blend defined in `common.py`, lightly
-smooths the result, and writes `data/day1.json` + `data/day1.meta.json`.
+Runs on a GitHub Actions cron every 12 hours (00 / 12 UTC). Pulls
+CAPE, CIN, surface and 850 hPa temperature/dewpoint, and wind at
+10 m / 850 hPa / 700 hPa / 500 hPa from the Open-Meteo forecast API
+for a ~1.25 degree CONUS grid, computes the multi-parameter
+environment x simref-proxy x storm-mode x lapse-rate blend defined
+in `common.py`, lightly smooths the result, and writes
+`data/day1.json` + `data/day1.meta.json`.
 
 Open-Meteo is used without an explicit `models=` parameter so the
 service picks the best-available member per point (HRRR / RAP where
@@ -100,7 +101,7 @@ def run(out_path: str, meta_path: str):
     }
     common.write_json(out_path, payload)
 
-    next_update = now + dt.timedelta(hours=5)
+    next_update = now + dt.timedelta(hours=12)
     common.write_meta(
         meta_path,
         source=payload["source"],
