@@ -57,12 +57,20 @@ jobs:
                   data/day3.json data/day3.meta.json
           if git diff --cached --quiet; then
             echo "no data changes"
-          else
-            git commit -m "data: $(date -u +%FT%TZ)"
-            # Retry pushes so the job survives transient network blips.
+            exit 0
+          fi
+          git commit -m "data: $(date -u +%FT%TZ)"
+          # Retry pushes so the job survives transient network blips.
+          push_with_retry() {
             for i in 1 2 3 4; do
-              if git push; then exit 0; fi
+              if git push "$@"; then return 0; fi
+              [ "$i" = "4" ] && return 1
               sleep $((2 ** i))
             done
-            exit 1
-          fi
+          }
+          push_with_retry || exit 1
+          # GitHub Pages serves from the legacy claude/thunderstorm-setup-KlAVq
+          # branch. Force-mirror it to the just-committed HEAD so each cron
+          # run automatically redeploys the public site with fresh data.
+          push_with_retry --force origin \
+            HEAD:refs/heads/claude/thunderstorm-setup-KlAVq || exit 1
