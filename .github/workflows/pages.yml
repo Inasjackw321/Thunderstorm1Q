@@ -1,0 +1,39 @@
+name: deploy-pages
+
+on:
+  push:
+    branches:
+      - main
+  # Let the data-update workflow re-trigger a deploy after it commits
+  # fresh JSON, so the public site picks up the new forecast.
+  workflow_run:
+    workflows: ['update-tornado-heatmap']
+    types: [completed]
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: .
+      - id: deployment
+        uses: actions/deploy-pages@v4
