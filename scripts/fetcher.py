@@ -304,7 +304,11 @@ def score_hour(grid, results, src_idx, valid_dt=None):
         f["cape"], f["cin"], f["lcl"], f["srh01"], f["srh03"],
         f["s01"], f["s03"], f["s06"],
         f["precip"], f["wc"], f["lapse"])
-    tor = common.gaussian_smooth_2d(tor, sigma_cells=1.1)
+    # Sub-cell smoothing only — just enough to damp single-point
+    # numerical noise without painting half a continent. At 1.5° grid
+    # spacing this is roughly a 3-cell box, ~250 km full width — close
+    # to SPC's 25-mi (~40 km radius / 80-km grid) verification scale.
+    tor = common.gaussian_smooth_2d(tor, sigma_cells=0.55)
 
     if valid_dt is not None:
         # Build a 2-D longitude grid (broadcast over latitudes), shift
