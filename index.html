@@ -82,11 +82,24 @@
     </div>
   </div>
 
-  <label class="toggle" title="Overlay live NEXRAD radar mosaic">
-    <input type="checkbox" id="radar-toggle" />
+  <label class="toggle" title="Toggle freehand drawing on the map">
+    <input type="checkbox" id="draw-toggle" />
     <span class="toggle-track" aria-hidden="true"></span>
-    <span class="toggle-label">Radar</span>
+    <span class="toggle-label">Draw</span>
   </label>
+  <button class="icon-btn" id="clear-btn" type="button"
+          title="Clear drawings" hidden>&times;</button>
+  <button class="icon-btn" id="locate-btn" type="button"
+          title="Show my location (CONUS only)" aria-label="Locate me">
+    <svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true">
+      <path fill="none" stroke="currentColor" stroke-width="2"
+            stroke-linecap="round" stroke-linejoin="round"
+            d="M12 2v3M12 19v3M2 12h3M19 12h3"/>
+      <circle cx="12" cy="12" r="6" fill="none"
+              stroke="currentColor" stroke-width="2"/>
+      <circle cx="12" cy="12" r="2" fill="currentColor"/>
+    </svg>
+  </button>
 </footer>
 
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
