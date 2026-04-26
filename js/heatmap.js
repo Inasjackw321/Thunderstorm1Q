@@ -45,9 +45,10 @@
   const mapTip    = document.getElementById('map-tip');
   const mapTipPct = document.getElementById('map-tip-pct');
   const mapTipCrd = document.getElementById('map-tip-coord');
-  const drawToggle = document.getElementById('draw-toggle');
-  const clearBtn   = document.getElementById('clear-btn');
   const locateBtn  = document.getElementById('locate-btn');
+  const locateErr  = document.getElementById('locate-error');
+  const locateErrBody = document.getElementById('locate-error-body');
+  const locateErrOk = document.getElementById('locate-error-ok');
 
   // CONUS bounds — same box the model is gridded over.
   const CONUS = { s: 24.5, w: -125.0, n: 49.5, e: -66.5 };
@@ -392,13 +393,6 @@
   }
 
   function onMapMove(e) {
-    if (drawing) {
-      // While drawing, extend the active polyline and skip the
-      // hover probe so the tooltip doesn't fight the cursor.
-      if (activePath) extendDraw(e.latlng);
-      hideMapTip();
-      return;
-    }
     if (!mapTip) return;
     const v = valueAtLatLon(e.latlng.lat, e.latlng.lng);
     if (v == null) { hideMapTip(); return; }
@@ -411,61 +405,6 @@
   function hideMapTip() {
     if (mapTip) mapTip.classList.remove('show');
   }
-
-  // ---------- freehand drawing ----------
-
-  // While drawing mode is on, pointer-down starts a new polyline,
-  // pointer-move appends vertices, pointer-up finalizes the segment.
-  // Each completed line is kept in `drawnPaths` so the clear button
-  // can wipe the whole sketch with one click.
-  let drawing = false;
-  let activePath = null;
-  const drawnPaths = [];
-
-  function setDrawing(on) {
-    drawing = !!on;
-    if (drawToggle) drawToggle.checked = drawing;
-    document.body.classList.toggle('drawing', drawing);
-    if (!drawing) endDraw();
-    hideMapTip();
-  }
-  function startDraw(latlng) {
-    activePath = L.polyline([latlng], {
-      color: '#ef4444',
-      weight: 3,
-      opacity: 0.92,
-      lineCap: 'round',
-      lineJoin: 'round',
-    }).addTo(map);
-    drawnPaths.push(activePath);
-    updateClearVisibility();
-  }
-  function extendDraw(latlng) {
-    if (activePath) activePath.addLatLng(latlng);
-  }
-  function endDraw() {
-    activePath = null;
-  }
-  function clearDrawings() {
-    while (drawnPaths.length) map.removeLayer(drawnPaths.pop());
-    activePath = null;
-    updateClearVisibility();
-  }
-  function updateClearVisibility() {
-    if (clearBtn) clearBtn.hidden = drawnPaths.length === 0;
-  }
-
-  if (drawToggle) {
-    drawToggle.addEventListener('change', () => setDrawing(drawToggle.checked));
-  }
-  if (clearBtn) clearBtn.addEventListener('click', clearDrawings);
-
-  map.on('mousedown', (e) => { if (drawing) startDraw(e.latlng); });
-  map.on('mouseup',  endDraw);
-  // While drawing, hijack the existing mousemove handler to append
-  // points instead of (or in addition to) showing the probe tooltip.
-  // Done by checking `drawing` inside onMapMove; that handler already
-  // exists and runs on every map mousemove.
 
   // ---------- geolocation (CONUS-gated) ----------
 
@@ -497,9 +436,34 @@
       fillOpacity: 1,
     }).addTo(map);
   }
+  function showLocateError(title, body) {
+    if (!locateErr) return;
+    if (locateErrBody) locateErrBody.textContent = body;
+    const titleEl = document.getElementById('locate-error-title');
+    if (titleEl && title) titleEl.textContent = title;
+    locateErr.hidden = false;
+    requestAnimationFrame(() => locateErr.classList.add('show'));
+    if (locateErrOk) locateErrOk.focus();
+  }
+  function hideLocateError() {
+    if (!locateErr) return;
+    locateErr.classList.remove('show');
+    setTimeout(() => { locateErr.hidden = true; }, 180);
+  }
+  if (locateErrOk) locateErrOk.addEventListener('click', hideLocateError);
+  if (locateErr) {
+    locateErr.addEventListener('click', (e) => {
+      if (e.target === locateErr) hideLocateError();
+    });
+  }
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && locateErr && !locateErr.hidden) hideLocateError();
+  });
+
   function locate() {
     if (!('geolocation' in navigator)) {
-      showBanner('error', 'Geolocation is not supported in this browser.');
+      showLocateError('Location unavailable',
+        'Your browser does not support geolocation.');
       return;
     }
     if (locateBtn) locateBtn.classList.add('loading');
@@ -510,21 +474,20 @@
         const lon = pos.coords.longitude;
         if (!inCONUS(lat, lon)) {
           clearLocate();
-          showBanner('stale',
-            'You are outside the CONUS forecast area — no marker added.');
-          setTimeout(hideBanner, 3500);
+          showLocateError('Outside CONUS',
+            'Your location is outside the contiguous United States, so '
+            + 'no marker was added. T1 only forecasts the CONUS domain.');
           return;
         }
         dropLocateMarker(lat, lon);
-        hideBanner();
       },
       (err) => {
         if (locateBtn) locateBtn.classList.remove('loading');
         const msg = err && err.code === err.PERMISSION_DENIED
-          ? 'Location permission denied.'
-          : 'Could not get your location.';
-        showBanner('error', msg);
-        setTimeout(hideBanner, 3500);
+          ? 'Location permission was denied. Allow location access in '
+            + 'your browser settings to use this feature.'
+          : 'Could not get your location. Try again in a moment.';
+        showLocateError('Location unavailable', msg);
       },
       { enableHighAccuracy: false, timeout: 8000, maximumAge: 60000 });
   }

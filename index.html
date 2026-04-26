@@ -82,13 +82,6 @@
     </div>
   </div>
 
-  <label class="toggle" title="Toggle freehand drawing on the map">
-    <input type="checkbox" id="draw-toggle" />
-    <span class="toggle-track" aria-hidden="true"></span>
-    <span class="toggle-label">Draw</span>
-  </label>
-  <button class="icon-btn" id="clear-btn" type="button"
-          title="Clear drawings" hidden>&times;</button>
   <button class="icon-btn" id="locate-btn" type="button"
           title="Show my location (CONUS only)" aria-label="Locate me">
     <svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true">
@@ -101,6 +94,19 @@
     </svg>
   </button>
 </footer>
+
+<div class="modal" id="locate-error" role="alertdialog"
+     aria-labelledby="locate-error-title" aria-modal="true" hidden>
+  <div class="modal-card">
+    <div class="modal-icon" aria-hidden="true">!</div>
+    <h2 class="modal-title" id="locate-error-title">Outside CONUS</h2>
+    <p class="modal-body" id="locate-error-body">
+      Your location is outside the contiguous United States, so no
+      marker was added. T1 only forecasts the CONUS domain.
+    </p>
+    <button class="modal-ok" id="locate-error-ok" type="button">Got it</button>
+  </div>
+</div>
 
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
         integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo="
