@@ -91,6 +91,10 @@
     pane: 'shadowPane', maxZoom: 18, subdomains: 'abcd',
   }).addTo(map);
 
+  // Tuck the attribution into the bottom-left corner so it isn't
+  // hidden behind the centered timeline pill.
+  if (map.attributionControl) map.attributionControl.setPosition('bottomleft');
+
 
   spark.addEventListener('keydown', onSparkKey);
   spark.addEventListener('pointerdown', onSparkPointerDown);
