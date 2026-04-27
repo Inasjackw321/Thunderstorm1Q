@@ -98,12 +98,24 @@ html, body {
 .leaflet-control-attribution {
   background: rgba(4, 8, 22, 0.55) !important;
   color: var(--dim) !important;
-  border-top-left-radius: 6px;
-  font-size: 10px !important;
+  border-radius: 6px;
+  font-size: 9px !important;
+  padding: 1px 6px !important;
+  margin: 0 !important;
   backdrop-filter: blur(6px);
   -webkit-backdrop-filter: blur(6px);
 }
 .leaflet-control-attribution a { color: var(--muted) !important; }
+/* Slot the attribution into a tiny corner well below the readout
+   so it doesn't fight the bottom timeline pill. The control is
+   moved to bottom-left in JS; this just trims its visual weight. */
+.leaflet-bottom.leaflet-left .leaflet-control-attribution {
+  margin-bottom: 4px !important;
+  margin-left: 4px !important;
+  opacity: 0.7;
+  transition: opacity 140ms var(--ease);
+}
+.leaflet-bottom.leaflet-left .leaflet-control-attribution:hover { opacity: 1; }
 
 /* ---------- brand strip (top, centered) ---------- */
 
@@ -169,22 +181,22 @@ html, body {
 
 .readout {
   position: absolute;
-  right: max(18px, env(safe-area-inset-right, 0px));
+  right: max(14px, env(safe-area-inset-right, 0px));
   top: 50%;
   transform: translateY(-50%);
   z-index: 606;
-  min-width: clamp(118px, 12vw, 148px);
-  padding: 10px 14px 9px;
+  min-width: 108px;
+  padding: 8px 12px 7px;
   background: var(--panel);
   border: 1px solid var(--line);
-  border-radius: 12px;
+  border-radius: 10px;
   backdrop-filter: blur(14px) saturate(140%);
   -webkit-backdrop-filter: blur(14px) saturate(140%);
   animation: fade-right 500ms var(--ease) 120ms both;
 }
 .ro-pct {
   font-family: "JetBrains Mono", ui-monospace, SFMono-Regular, monospace;
-  font-size: clamp(22px, 3.6vw, 34px);
+  font-size: clamp(20px, 2.4vw, 26px);
   font-weight: 700;
   line-height: 1;
   color: var(--fg);
@@ -196,9 +208,9 @@ html, body {
 }
 .ro-pct.tick { opacity: 0.45; }
 .ro-time {
-  margin-top: 4px;
+  margin-top: 3px;
   font-family: "JetBrains Mono", ui-monospace, SFMono-Regular, monospace;
-  font-size: 11px;
+  font-size: 10px;
   font-weight: 500;
   color: var(--muted);
   letter-spacing: 0.04em;
@@ -206,9 +218,9 @@ html, body {
 }
 .ro-time.tick { opacity: 0.5; }
 .ro-status {
-  display: inline-flex; align-items: center; gap: 6px;
-  margin-top: 8px;
-  font-size: 9.5px;
+  display: inline-flex; align-items: center; gap: 5px;
+  margin-top: 6px;
+  font-size: 9px;
   font-weight: 500;
   letter-spacing: 0.08em;
   text-transform: uppercase;
@@ -290,9 +302,9 @@ html, body {
   bottom: calc(14px + env(safe-area-inset-bottom, 0px));
   transform: translateX(-50%);
   z-index: 606;
-  display: flex; align-items: center; gap: 10px;
-  padding: 6px 10px;
-  width: min(880px, calc(100vw - 28px));
+  display: flex; align-items: center; gap: 8px;
+  padding: 5px 8px;
+  width: min(640px, calc(100vw - 28px));
   background: var(--panel);
   border: 1px solid var(--line);
   border-radius: 12px;
@@ -311,9 +323,9 @@ html, body {
   border-radius: 999px;
 }
 .pill {
-  padding: 3px 9px;
+  padding: 3px 8px;
   font-family: "JetBrains Mono", ui-monospace, SFMono-Regular, monospace;
-  font-size: 9.5px;
+  font-size: 9px;
   font-weight: 600;
   letter-spacing: 0.05em;
   color: var(--muted);
@@ -450,8 +462,8 @@ html, body {
 /* Row frame: holds bars + playhead + tooltip. */
 .spark {
   position: relative;
-  height: 30px;
-  border-radius: 7px;
+  height: 26px;
+  border-radius: 6px;
   cursor: pointer;
   outline: none;
   background: linear-gradient(180deg, rgba(255,255,255,0.02), rgba(255,255,255,0) 40%);
