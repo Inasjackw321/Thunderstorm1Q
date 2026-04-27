@@ -498,17 +498,16 @@
   if (locateBtn) locateBtn.addEventListener('click', locate);
 
   function tintReadout(mx) {
+    // Tint the percentage with the heat gradient when we have any
+    // signal at all, but skip the box-shadow glow — the colored
+    // text alone reads cleaner against the dark panel.
     if (!roPct) return;
-    const t = Math.max(0, Math.min(1, mx / BAR_SCALE));
     if (mx < SIGNAL_MIN) {
       roPct.style.color = '';
-      roPct.style.textShadow = '';
       return;
     }
-    const c = colorAt(t);
-    roPct.style.color = rgb(c);
-    const a = (0.22 + t * 0.35).toFixed(2);
-    roPct.style.textShadow = `0 0 ${Math.round(10 + t * 18)}px ${rgb(c, a)}`;
+    const t = Math.max(0, Math.min(1, mx / BAR_SCALE));
+    roPct.style.color = rgb(colorAt(t));
   }
 
   // Soft crossfade on text so scrubbing / autoplay feels polished.
