@@ -18,7 +18,7 @@
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
       integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY="
       crossorigin="" />
-<link rel="stylesheet" href="css/heatmap.css" />
+<link rel="stylesheet" href="css/heatmap.css?v=2026-04-28b" />
 </head>
 <body>
 
@@ -31,7 +31,7 @@
 </main>
 
 <header class="brand-strip">
-  <a class="brand" href="#" aria-label="Thunderstorm1Q home">
+  <div class="brand">
     <svg class="mark" viewBox="0 0 40 40" width="16" height="16" aria-hidden="true">
       <defs>
         <linearGradient id="bolt-g" x1="0" y1="0" x2="1" y2="1">
@@ -44,7 +44,14 @@
     </svg>
     <span class="b-title">Thunderstorm<span class="accent">1Q</span></span>
     <span class="b-model">T1</span>
-  </a>
+    <span class="b-divider" aria-hidden="true"></span>
+    <span class="b-pct" id="ro-pct">&mdash;</span>
+    <span class="b-status" id="ro-status">
+      <span class="ro-dot" aria-hidden="true"></span>
+      <span class="b-status-text" id="ro-status-text">loading</span>
+    </span>
+    <span class="b-time" id="ro-time" aria-hidden="true">&mdash;</span>
+  </div>
 </header>
 
 <div id="state-banner" class="banner" hidden></div>
@@ -74,16 +81,6 @@
         <span class="tip-pct" id="tip-pct">0%</span>
       </div>
     </div>
-  </div>
-
-  <div class="timeline-status" id="timeline-status">
-    <span class="ts-pct" id="ro-pct">&mdash;</span>
-    <span class="ts-sep" aria-hidden="true">&middot;</span>
-    <span class="ts-status" id="ro-status">
-      <span class="ro-dot" aria-hidden="true"></span>
-      <span class="ts-status-text" id="ro-status-text">loading</span>
-    </span>
-    <span class="ts-tooltip" id="ro-time" role="tooltip">&mdash;</span>
   </div>
 
   <button class="icon-btn" id="locate-btn" type="button"
@@ -116,6 +113,6 @@
         integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo="
         crossorigin=""></script>
 <script src="https://unpkg.com/leaflet.heat@0.2.0/dist/leaflet-heat.js"></script>
-<script src="js/heatmap.js"></script>
+<script src="js/heatmap.js?v=2026-04-28b"></script>
 </body>
 </html>
