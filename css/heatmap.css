@@ -171,66 +171,94 @@ html, body {
   border: 1px solid rgba(239, 68, 68, 0.32);
 }
 
-/* ---------- readout (right) ---------- */
+/* ---------- inline status (lives inside the timeline pill) ----------
 
-.readout {
-  position: absolute;
-  right: max(14px, env(safe-area-inset-right, 0px));
-  top: 50%;
-  transform: translateY(-50%);
-  z-index: 606;
-  display: flex; flex-direction: column; gap: 4px;
-  min-width: 108px;
-  padding: 9px 13px 8px;
-  background: var(--panel);
-  border: 1px solid var(--line);
-  border-radius: var(--r-card);
-  backdrop-filter: blur(14px) saturate(140%);
-  -webkit-backdrop-filter: blur(14px) saturate(140%);
-  box-shadow: var(--shadow-card);
-  animation: fade-right 500ms var(--ease) 120ms both;
+   The percentage / time / live-dot trio used to be a separate floating
+   card on the right edge of the screen. It now sits inside the timeline
+   pill as `.timeline-status`, with the date+time tucked into a hover
+   tooltip. The `ro-pct` / `ro-time` / `ro-status` IDs are preserved so
+   js/heatmap.js's lookups don't change. */
+
+.timeline-status {
+  position: relative;
+  display: inline-flex; align-items: baseline; gap: 6px;
+  flex: none;
+  padding: 0 4px;
+  white-space: nowrap;
+  cursor: default;
 }
-.ro-pct {
+.ts-pct {
   font-family: "JetBrains Mono", ui-monospace, SFMono-Regular, monospace;
-  font-size: clamp(20px, 2.4vw, 26px);
+  font-size: 14px;
   font-weight: 600;
   line-height: 1;
   color: var(--fg);
-  letter-spacing: -0.02em;
+  letter-spacing: -0.01em;
   font-variant-numeric: tabular-nums;
   transition: opacity 180ms var(--ease),
               color 260ms var(--ease);
 }
-.ro-pct.tick { opacity: 0.45; }
-.ro-time {
-  font-family: "JetBrains Mono", ui-monospace, SFMono-Regular, monospace;
-  font-size: 10px;
+.ts-pct.tick { opacity: 0.45; }
+.ts-sep {
+  color: var(--dim);
   font-weight: 500;
-  color: var(--muted);
-  letter-spacing: 0.02em;
-  transition: opacity 180ms var(--ease);
+  font-size: 11px;
+  line-height: 1;
 }
-.ro-time.tick { opacity: 0.5; }
-.ro-status {
-  display: inline-flex; align-items: center; gap: 6px;
-  margin-top: 1px;
+.ts-status {
+  display: inline-flex; align-items: center; gap: 5px;
   font-size: 9px;
   font-weight: 600;
   letter-spacing: 0.10em;
   text-transform: uppercase;
   color: var(--muted);
 }
+.ts-status-text { transition: opacity 180ms var(--ease); }
 .ro-dot {
-  width: 7px; height: 7px;
+  width: 6px; height: 6px;
   border-radius: 50%;
   background: var(--dim);
-  box-shadow: 0 0 0 0 rgba(90, 111, 153, 0);
   transition: background 180ms var(--ease);
 }
-.ro-status.live .ro-dot    { background: var(--ok); animation: dot-pulse 2.4s ease-in-out infinite; }
-.ro-status.stale .ro-dot   { background: var(--warn); }
-.ro-status.seed .ro-dot    { background: var(--accent); }
-.ro-status.error .ro-dot   { background: var(--error); }
+.ts-status.live .ro-dot   { background: var(--ok); animation: dot-pulse 2.4s ease-in-out infinite; }
+.ts-status.stale .ro-dot  { background: var(--warn); }
+.ts-status.seed .ro-dot   { background: var(--accent); }
+.ts-status.error .ro-dot  { background: var(--error); }
+
+/* Hover/focus tooltip showing the full date+time of the active frame.
+   Reuses the panel/border/shadow tokens for visual consistency with
+   the spark-tip and map-tip. */
+.ts-tooltip {
+  position: absolute;
+  bottom: calc(100% + 8px);
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 4px 9px;
+  font-family: "JetBrains Mono", ui-monospace, SFMono-Regular, monospace;
+  font-size: 10px;
+  font-weight: 500;
+  line-height: 1;
+  letter-spacing: 0.02em;
+  color: var(--fg);
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  box-shadow: var(--shadow-card);
+  white-space: nowrap;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 140ms var(--ease);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  z-index: 3;
+}
+.timeline-status:hover .ts-tooltip,
+.timeline-status:focus-within .ts-tooltip { opacity: 1; }
+
+/* Hide the legacy floating readout — JS still references the IDs but
+   the markup no longer ships in index.html. Belt-and-suspenders rule
+   in case any older cached HTML lingers in a CDN/browser. */
+.readout { display: none !important; }
 
 /* ---------- map hover tooltip (cursor probe) ---------- */
 
@@ -297,17 +325,16 @@ html, body {
   bottom: calc(14px + env(safe-area-inset-bottom, 0px));
   transform: translateX(-50%);
   z-index: 606;
-  /* 1fr | auto | 1fr — the spark sits in the middle column and is
-     genuinely centered in the pill, with the day pills floating in
-     the left gutter and the locate button floating in the right
-     gutter. Without this the spark drifts right because the pills
-     are wider than the locate button.                            */
+  /* auto | 1fr | auto | auto: pills | spark | inline-status | locate.
+     The spark stretches to fill the middle, so the slider always reads
+     as the visual focus of the pill regardless of how the side widths
+     change. */
   display: grid;
-  grid-template-columns: 1fr auto 1fr;
+  grid-template-columns: auto minmax(180px, 1fr) auto auto;
   align-items: center;
-  column-gap: 10px;
-  padding: 6px 10px;
-  width: min(560px, calc(100vw - 28px));
+  column-gap: 12px;
+  padding: 8px 12px;
+  width: min(680px, calc(100vw - 28px));
   background: var(--panel);
   border: 1px solid var(--line);
   border-radius: var(--r-card);
@@ -316,12 +343,10 @@ html, body {
   box-shadow: var(--shadow-card);
   animation: fade-up 460ms var(--ease) 60ms both;
 }
-.timeline > .day-pills { justify-self: start; }
-.timeline > .spark-wrap {
-  width: clamp(150px, 42vw, 360px);
-  justify-self: center;
-}
-.timeline > .icon-btn { justify-self: end; }
+.timeline > .day-pills      { justify-self: start; }
+.timeline > .spark-wrap     { justify-self: stretch; min-width: 0; }
+.timeline > .timeline-status{ justify-self: end; }
+.timeline > .icon-btn       { justify-self: end; }
 
 .day-pills {
   display: inline-flex; align-items: center; gap: 1px;
@@ -461,107 +486,112 @@ html, body {
   box-shadow: 0 0 0 2px rgba(248, 113, 113, 0.55);
 }
 
-.spark-wrap {
-  flex: 1;
-  min-width: 0;
-}
+.spark-wrap { min-width: 0; }
 
-/* Row frame: holds bars + playhead + tooltip. */
+/* The spark is the slider hit target. The visible elements are the
+   track (rounded rail) at row 1, the tick row below it, the white
+   circular knob (.spark-head) sitting on top of the track, and the
+   hover bubble (.spark-tip) floating above the knob. The knob is
+   positioned horizontally via the --x CSS var (0..1). */
 .spark {
   position: relative;
   height: 26px;
-  border-radius: 6px;
   cursor: pointer;
   outline: none;
-  background: linear-gradient(180deg, rgba(255,255,255,0.02), rgba(255,255,255,0) 40%);
-  box-shadow: inset 0 0 0 1px rgba(120, 140, 190, 0.08);
   touch-action: none;
   user-select: none;
   -webkit-user-select: none;
 }
-.spark::before {                    /* baseline rule */
-  content: "";
-  position: absolute; left: 3px; right: 3px; bottom: 2px;
-  height: 1px;
-  background: linear-gradient(90deg,
-    rgba(120, 140, 190, 0) 0%,
-    rgba(120, 140, 190, 0.30) 10%,
-    rgba(120, 140, 190, 0.30) 90%,
-    rgba(120, 140, 190, 0) 100%);
-  pointer-events: none;
-}
-.spark:focus-visible { box-shadow: inset 0 0 0 1px rgba(239, 68, 68, 0.55); }
 .spark.dragging { cursor: grabbing; }
+.spark:focus-visible { outline: 1px solid var(--line-hi); outline-offset: 2px; border-radius: 4px; }
 
-.spark-bars {
-  position: absolute; inset: 2px 3px 2px 3px;
-  display: flex; align-items: flex-end;
-  gap: 2px;
+/* Track — empty rail; .spark-fill is the heat-colored "elapsed"
+   portion driven by --x. */
+.spark-track {
+  position: absolute;
+  left: 10px; right: 10px;
+  top: 7px;
+  height: 4px;
+  border-radius: var(--r-pill);
+  background: rgba(120, 140, 190, 0.18);
+  overflow: hidden;
+}
+.spark-fill {
+  position: absolute;
+  left: 0; top: 0; bottom: 0;
+  width: calc(var(--x, 0) * 100%);
+  background: linear-gradient(90deg,
+    var(--c1, rgba(120, 140, 190, 0.45)) 0%,
+    var(--c2, rgba(120, 140, 190, 0.55)) 100%);
+  transition: width 220ms var(--ease),
+              background 260ms var(--ease);
 }
 
-.bar {
-  flex: 1;
-  min-width: 3px;
-  height: 100%;
-  position: relative;
-  border-radius: 4px 4px 1px 1px;
-  background: rgba(120, 140, 190, 0.08);
-  transition: background 180ms var(--ease), transform 160ms var(--ease);
-}
-.bar::before {                      /* the filled value (gradient) */
-  content: "";
-  position: absolute; left: 0; right: 0; bottom: 0;
-  height: var(--h, 4%);
-  min-height: 2px;
-  border-radius: 3px 3px 1px 1px;
-  background:
-    linear-gradient(180deg,
-      rgba(255,255,255,0.18) 0%,
-      rgba(255,255,255,0) 40%),
-    linear-gradient(180deg,
-      var(--c1, #6b7fb2) 0%,
-      var(--c2, #38475f) 100%);
-  box-shadow:
-    0 0 var(--glow, 0px) 0 var(--c1, transparent),
-    inset 0 1px 0 rgba(255,255,255,0.10);
-  transition: height 300ms var(--ease),
-              background 260ms var(--ease),
-              box-shadow 260ms var(--ease),
-              filter 180ms var(--ease);
-}
-.bar::after {                       /* hover/active halo */
-  content: "";
-  position: absolute; inset: 0;
-  border-radius: inherit;
-  background: transparent;
-  transition: background 160ms var(--ease);
+/* Tick labels under the track. Positioned absolutely via inline
+   style.left set from JS so quarter-points align under their frame. */
+.spark-ticks {
+  position: absolute;
+  left: 10px; right: 10px;
+  bottom: 0;
+  height: 12px;
   pointer-events: none;
 }
-.bar:hover::after { background: rgba(255, 255, 255, 0.04); }
-.bar:hover::before { filter: brightness(1.10); }
-.bar.past::before     { filter: saturate(0.6) brightness(0.78); }
-.bar.active::before   { filter: brightness(1.18); }
+.tick-label {
+  position: absolute;
+  top: 0;
+  transform: translateX(-50%);
+  padding: 0 3px;
+  font-family: "JetBrains Mono", ui-monospace, SFMono-Regular, monospace;
+  font-size: 8.5px;
+  font-weight: 500;
+  line-height: 1.2;
+  letter-spacing: 0.06em;
+  color: var(--dim);
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  pointer-events: auto;
+  transition: color 140ms var(--ease);
+}
+.tick-label:hover { color: var(--muted); }
+.tick-label.past  { color: var(--muted); opacity: 0.85; }
+.tick-label:focus-visible {
+  outline: none;
+  color: var(--fg);
+}
 
-/* Playhead line — a single thin white line, no glow, no
-   end-cap dots. Subtle is more legible than dramatic. */
+/* The knob — a circular handle pinned to the track via --x. */
 .spark-head {
   position: absolute;
-  top: 1px; bottom: 1px;
-  left: calc(3px + var(--x, 0) * (100% - 6px));
-  width: 1.5px;
-  margin-left: -0.75px;
+  /* Track midline is at top:9 (top:7 + height:4 / 2). Knob is 12px,
+     so to center on the track midline: top = 9 - 6 = 3. */
+  top: 3px;
+  left: calc(10px + var(--x, 0) * (100% - 20px));
+  width: 12px; height: 12px;
+  margin-left: -6px;
+  border-radius: 50%;
   background: var(--fg);
-  border-radius: 1px;
+  border: 1px solid rgba(0, 0, 0, 0.28);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.40);
   pointer-events: none;
-  transition: left 220ms var(--ease);
-  opacity: 0.78;
+  transition: left 220ms var(--ease),
+              transform 140ms var(--ease),
+              box-shadow 140ms var(--ease);
+  z-index: 2;
+}
+.spark:hover .spark-head,
+.spark.dragging .spark-head,
+.spark:focus-visible .spark-head {
+  transform: scale(1.18);
+  box-shadow: 0 0 0 4px rgba(255, 255, 255, 0.10),
+              0 1px 3px rgba(0, 0, 0, 0.40);
 }
 
-/* Floating tooltip — positioned via --x (0..1). */
+/* Floating tooltip — positioned via --x (0..1) above the knob. */
 .spark-tip {
   position: absolute;
-  left: calc(3px + var(--x, 0) * (100% - 6px));
-  bottom: calc(100% + 6px);
+  left: calc(10px + var(--x, 0) * (100% - 20px));
+  bottom: calc(100% - 4px);
   transform: translateX(-50%);
   display: inline-flex; align-items: baseline; gap: 6px;
   padding: 4px 8px;
@@ -580,7 +610,7 @@ html, body {
   pointer-events: none;
   opacity: 0;
   transition: opacity 140ms var(--ease), left 120ms var(--ease);
-  z-index: 2;
+  z-index: 3;
 }
 .spark-tip::after {
   content: "";
@@ -607,53 +637,41 @@ html, body {
 */
 
 @media (max-width: 760px) {
-  .readout { padding: 9px 12px 8px; }
-  .timeline { padding: 5px 9px; gap: 8px; }
+  .timeline { padding: 6px 10px; column-gap: 10px; }
   .pill { padding: 3px 8px; font-size: 9.5px; }
-  .spark { height: 28px; }
+  .ts-pct { font-size: 13px; }
+  .spark { height: 26px; }
+  .spark-track { left: 9px; right: 9px; }
+  .spark-ticks { left: 9px; right: 9px; }
+  .spark-head  { top: 3px; left: calc(9px + var(--x, 0) * (100% - 18px)); }
+  .spark-tip   { left: calc(9px + var(--x, 0) * (100% - 18px)); }
 }
 
-/* phone — readout collapses into a horizontal status pill anchored
-   under the brand strip, freeing the right side of the map. */
+/* phone — drop the tick row and shrink the slider to a single track
+   line; the inline status compacts to "42% [dot]". */
 @media (max-width: 540px) {
   .brand { gap: 6px; padding: 4px 10px; }
   .b-title { font-size: 11px; }
   .b-model { font-size: 9px; padding: 1px 5px; }
-  .readout {
-    top: calc(56px + env(safe-area-inset-top, 0px));
-    right: 50%;
-    transform: translateX(50%);
-    display: inline-flex; align-items: center; gap: 10px;
-    padding: 5px 12px;
-    min-width: 0;
-    border-radius: 999px;
-    animation: fade-down 500ms var(--ease) 120ms both;
-  }
-  .ro-pct {
-    font-size: clamp(20px, 5.6vw, 24px);
-    line-height: 1;
-  }
-  .ro-time {
-    margin-top: 0;
-    padding-left: 8px;
-    border-left: 1px solid var(--line);
-    font-size: 10px;
-  }
-  .ro-status {
-    margin-top: 0;
-    padding-left: 8px;
-    border-left: 1px solid var(--line);
-    font-size: 9px;
-  }
 
   .brand-strip { top: calc(10px + env(safe-area-inset-top, 0px)); }
   .timeline {
     bottom: calc(10px + env(safe-area-inset-bottom, 0px));
     width: calc(100vw - 20px);
-    gap: 6px; padding: 4px 7px;
+    column-gap: 8px; padding: 6px 9px;
+    grid-template-columns: auto minmax(0, 1fr) auto auto;
   }
-  .spark { height: 24px; border-radius: 6px; }
-  .spark-tip { font-size: 9px; padding: 3px 6px; }
+  .spark { height: 18px; }
+  .spark-track { top: 7px; left: 8px; right: 8px; }
+  .spark-head  { top: 3px; left: calc(8px + var(--x, 0) * (100% - 16px)); }
+  .spark-tip   { left: calc(8px + var(--x, 0) * (100% - 16px));
+                  font-size: 9px; padding: 3px 6px; }
+  .spark-ticks { display: none; }
+
+  .ts-pct { font-size: 12px; }
+  .ts-sep { display: none; }
+  .ts-status-text { display: none; }
+
   .pill { padding: 2px 7px; font-size: 9px; letter-spacing: 0.04em; }
   .icon-btn { width: 24px; height: 20px; }
 
@@ -665,9 +683,8 @@ html, body {
   .modal-body { font-size: 12px; }
 }
 
-/* tiny phones: the lat/lon line in the cursor tip doesn't really
-   help on a 320 px screen, hide it to keep the bubble small. */
+/* tiny phones: drop the lat/lon row in the cursor tip to keep
+   the bubble compact. */
 @media (max-width: 380px) {
   .map-tip-coord { display: none; }
-  .ro-time { display: none; }
 }

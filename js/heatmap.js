@@ -30,7 +30,8 @@
   ];
 
   const spark     = document.getElementById('spark');
-  const sparkBars = document.getElementById('spark-bars');
+  const sparkFill = document.getElementById('spark-fill');
+  const sparkTicks= document.getElementById('spark-ticks');
   const sparkHead = document.getElementById('spark-head');
   const sparkTip  = document.getElementById('spark-tip');
   const tipFh     = document.getElementById('tip-fh');
@@ -61,7 +62,7 @@
   let currentFh = 1;
   let totalFrames = DAYS[0].bars;
   let heatLayer = null;
-  let bars = [];
+  let tickEls   = [];   // current .tick-label children of #spark-ticks
 
   // Leaflet: locked map.
   const map = L.map('map', {
@@ -144,53 +145,85 @@
   }
   function darker(c, k) { return [c[0] * k, c[1] * k, c[2] * k]; }
 
+  // Pick which fhs to render as tick labels for a given frame count.
+  // Day 1 (n=24) shows quarter-points without endpoints to avoid
+  // colliding with the knob at the rail's edges; day 2 / day 3
+  // (n=4) label every frame as W1..W4.
+  function tickFhs(n, prefix) {
+    if (n === 4)  return [1, 2, 3, 4];
+    if (n === 24) return [6, 12, 18];
+    // generic: every (n / 4) starting at floor(n/4), skip endpoints.
+    const step = Math.max(1, Math.round(n / 4));
+    const out = [];
+    for (let f = step; f < n; f += step) out.push(f);
+    return out;
+  }
+
   function buildSpark(n) {
-    sparkBars.innerHTML = '';
-    bars = [];
-    for (let i = 1; i <= n; i++) {
-      const b = document.createElement('div');
-      b.className = 'bar';
-      b.dataset.fh = String(i);
-      b.style.setProperty('--h', '4%');
-      b.style.setProperty('--c1', rgb(DIM, 0.55));
-      b.style.setProperty('--c2', rgb(darker(DIM, 0.55), 0.75));
-      sparkBars.appendChild(b);
-      bars.push(b);
+    sparkTicks.innerHTML = '';
+    tickEls = [];
+    const prefix = (DAYS[currentDay - 1] || DAYS[0]).fhPrefix;
+    for (const fh of tickFhs(n, prefix)) {
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.className = 'tick-label';
+      b.dataset.fh = String(fh);
+      b.textContent = prefix + String(fh).padStart(2, '0');
+      // Position label at (fh-1)/(n-1) along the rail.
+      const x = n <= 1 ? 0 : (fh - 1) / (n - 1);
+      b.style.left = (x * 100).toFixed(2) + '%';
+      sparkTicks.appendChild(b);
+      tickEls.push(b);
     }
     spark.setAttribute('aria-valuemin', '1');
     spark.setAttribute('aria-valuemax', String(n));
+  }
+
+  // Single-frame visuals: width and color of the heat-fill plus the
+  // .past flag on each tick label. The knob position is owned by
+  // updatePlayhead() so dragging stays smooth.
+  function paintSpark() {
+    const d = datasets[currentDay];
+    const hours = (d && d.hours) || [];
+    const rec = hours.find(h => h.fh === currentFh) || hours[currentFh - 1];
+    const mx  = rec ? (tornadoRec(rec).max || 0) : 0;
+    const t   = Math.max(0, Math.min(1, mx / BAR_SCALE));
+
+    if (sparkFill) {
+      const x = totalFrames <= 1 ? 0 : (currentFh - 1) / (totalFrames - 1);
+      sparkFill.style.setProperty('--x', x.toFixed(4));
+      if (mx >= SIGNAL_MIN) {
+        const c = colorAt(t);
+        sparkFill.style.setProperty('--c1', rgb(c, 0.55));
+        sparkFill.style.setProperty('--c2', rgb(c));
+      } else {
+        sparkFill.style.setProperty('--c1', rgb(DIM, 0.40));
+        sparkFill.style.setProperty('--c2', rgb(DIM, 0.55));
+      }
+    }
+
+    tickEls.forEach((el) => {
+      const fh = Number(el.dataset.fh);
+      el.classList.toggle('past', fh < currentFh);
+    });
+
+    spark.setAttribute('aria-valuenow', String(currentFh));
+    updatePlayhead();
   }
 
   buildSpark(totalFrames);
   loadAll();
   setInterval(pollForUpdate, POLL_MS);
 
-  function paintSpark() {
-    const d = datasets[currentDay];
-    const hours = (d && d.hours) || [];
-    bars.forEach((el, idx) => {
-      const fh = idx + 1;
-      const rec = hours.find(h => h.fh === fh) || hours[idx];
-      const mx  = rec ? (tornadoRec(rec).max || 0) : 0;
-      const t   = Math.max(0, Math.min(1, mx / BAR_SCALE));
-      const pct = Math.max(4, Math.min(100, t * 100));
-      el.style.setProperty('--h', pct.toFixed(1) + '%');
-      if (mx >= SIGNAL_MIN) {
-        const c = colorAt(t);
-        el.style.setProperty('--c1', rgb(c));
-        el.style.setProperty('--c2', rgb(darker(c, 0.55)));
-        el.style.setProperty('--glow', Math.round(6 + t * 10) + 'px');
-      } else {
-        el.style.setProperty('--c1', rgb(DIM, 0.55));
-        el.style.setProperty('--c2', rgb(darker(DIM, 0.55), 0.75));
-        el.style.setProperty('--glow', '0px');
-      }
-      el.classList.toggle('signal', mx >= SIGNAL_MIN);
-      el.classList.toggle('past',   fh < currentFh);
-      el.classList.toggle('active', fh === currentFh);
+  // Click a tick label to jump straight to that frame.
+  if (sparkTicks) {
+    sparkTicks.addEventListener('click', (e) => {
+      const el = e.target.closest('.tick-label');
+      if (!el || !el.dataset.fh) return;
+      e.stopPropagation();
+      setFrame(Number(el.dataset.fh));
+      spark.focus({ preventScroll: true });
     });
-    spark.setAttribute('aria-valuenow', String(currentFh));
-    updatePlayhead();
   }
 
   function updatePlayhead() {
@@ -202,8 +235,12 @@
   // ---------- scrub / hover ----------
 
   function fhFromClientX(clientX) {
+    // Padding mirrors the track padding in CSS so cursor-x maps
+    // 1:1 to the visible portion of the rail. The mobile media
+    // query uses 8 px instead of 10 px — close enough that the
+    // mid-track frame-pick is unaffected.
     const rect = spark.getBoundingClientRect();
-    const pad = 3;
+    const pad = 10;
     const usable = Math.max(1, rect.width - pad * 2);
     const frac = Math.max(0, Math.min(1, (clientX - rect.left - pad) / usable));
     return Math.max(1, Math.min(totalFrames, Math.round(frac * (totalFrames - 1)) + 1));
