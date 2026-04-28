@@ -51,6 +51,10 @@ HOURLY_VARS = [
     "wind_direction_700hPa",
     "wind_speed_500hPa",
     "wind_direction_500hPa",
+    "temperature_700hPa",
+    "dew_point_700hPa",
+    "temperature_500hPa",
+    "freezing_level_height",
     "precipitation",
     "weather_code",
 ]
@@ -223,6 +227,10 @@ def derive_fields(point_hourly, hour_idx):
     t2  = g("temperature_2m")
     td2 = g("dew_point_2m")
     t85 = g("temperature_850hPa")
+    t70 = g("temperature_700hPa")
+    td70 = g("dew_point_700hPa")
+    t50 = g("temperature_500hPa")
+    fz  = g("freezing_level_height")
     s10 = g("wind_speed_10m");   d10 = g("wind_direction_10m")
     s85 = g("wind_speed_850hPa"); d85 = g("wind_direction_850hPa")
     s70 = g("wind_speed_700hPa"); d70 = g("wind_direction_700hPa")
@@ -261,10 +269,17 @@ def derive_fields(point_hourly, hour_idx):
     lcl = common.lcl_height_m(t2, td2)
     low_lapse = common.low_level_lapse_rate(t2, t85)
 
+    # Mean 0-6 km wind magnitude (cloud-layer steering speed) — the
+    # severe-wind blend wants stronger gust-front speeds when the
+    # whole column is screaming.
+    mean6 = float(np.hypot(u_mean, v_mean))
+
     return dict(cape=cape, cin=cin, lcl=lcl,
                 srh01=srh01, srh03=srh03,
                 shear_01=shear_01, shear_03=shear_03, shear_06=shear_06,
-                low_lapse=low_lapse, precip=precip, weather_code=wc)
+                low_lapse=low_lapse, precip=precip, weather_code=wc,
+                t_700=t70, td_700=td70, t_500=t50,
+                freezing_level=fz, mean6=mean6)
 
 
 def find_hour_indices(sample_hourly, first_valid_utc, n_hours):
@@ -289,62 +304,79 @@ def find_hour_indices(sample_hourly, first_valid_utc, n_hours):
 
 
 def score_hour(grid, results, src_idx, valid_dt=None):
-    """Run one forecast hour through the physics blend and return the
-    smoothed 2-D tornado-probability field. Returns a zero field if
-    the hour is missing from the Open-Meteo response.
+    """Run one forecast hour through all three hazard blends and
+    return a dict {tornado, wind, hail} of smoothed 2-D probability
+    fields. Returns zero-fields if the hour is missing from the
+    Open-Meteo response.
 
-    If `valid_dt` is supplied, applies the per-cell diurnal-climatology
-    weight (peaks late afternoon LST, troughs around dawn) so the
-    nocturnal CONUS doesn't show the same risk as a 5pm warm sector.
+    If `valid_dt` is supplied, the diurnal climatology weight (peaks
+    late afternoon LST, troughs around dawn) is applied to each
+    hazard so a 3 a.m. warm sector doesn't read the same as a 5 pm
+    one.
     """
+    zeros = np.zeros(grid.shape, dtype=np.float64)
     if src_idx is None:
-        return np.zeros(grid.shape, dtype=np.float64)
+        return {"tornado": zeros, "wind": zeros, "hail": zeros}
+
     f = extract_hour_fields(grid, results, src_idx)
+
     tor = common.tornado_probability(
         f["cape"], f["cin"], f["lcl"], f["srh01"], f["srh03"],
         f["s01"], f["s03"], f["s06"],
         f["precip"], f["wc"], f["lapse"])
+    wnd = common.wind_probability(
+        f["cape"], f["cin"], f["s06"], f["mean6"],
+        f["t700"], f["td700"], f["t500"],
+        f["precip"], f["wc"], f["s01"], f["s03"], f["s06"])
+    hl = common.hail_probability(
+        f["cape"], f["cin"], f["s06"],
+        f["t700"], f["t500"], f["fzlvl"], f["lcl"],
+        f["precip"], f["wc"], f["s01"], f["s03"], f["s06"])
+
     # Sub-cell smoothing only — just enough to damp single-point
-    # numerical noise without painting half a continent. At 1.5° grid
-    # spacing this is roughly a 3-cell box, ~250 km full width — close
-    # to SPC's 25-mi (~40 km radius / 80-km grid) verification scale.
+    # numerical noise without painting half a continent.
     tor = common.gaussian_smooth_2d(tor, sigma_cells=0.55)
+    wnd = common.gaussian_smooth_2d(wnd, sigma_cells=0.55)
+    hl  = common.gaussian_smooth_2d(hl,  sigma_cells=0.55)
 
     if valid_dt is not None:
-        # Build a 2-D longitude grid (broadcast over latitudes), shift
-        # to local solar hour, multiply by the diurnal weight.
         _, lons2d = np.meshgrid(grid.lats, grid.lons, indexing="ij")
         utc_h = valid_dt.hour + valid_dt.minute / 60.0
         lsh = common.local_solar_hour(utc_h, lons2d)
-        tor = tor * common.diurnal_factor(lsh)
+        diurnal = common.diurnal_factor(lsh)
+        tor = tor * diurnal
+        wnd = wnd * diurnal
+        hl  = hl  * diurnal
 
-    return np.clip(tor, 0.0, 1.0)
+    return {
+        "tornado": np.clip(tor, 0.0, 1.0),
+        "wind":    np.clip(wnd, 0.0, 1.0),
+        "hail":    np.clip(hl,  0.0, 1.0),
+    }
+
+
+# Hazard keys we ship in every JSON output, in display order.
+HAZARDS = ("tornado", "wind", "hail")
 
 
 def compute_gfs_day(grid, results, first_valid_utc, day_offset_hours,
                     attenuation):
     """Build the 4-frame, 6-hour-max day payload used by Day 2 and
-    Day 3. Each frame's field is the per-cell MAX across the six
-    contained hours — hazard products want peaks, not means — then
-    multiplied by `attenuation` (< 1.0) to honestly reflect GFS skill
-    at 48–72h lead times.
+    Day 3. Each frame holds three hazard fields (tornado / wind /
+    hail), each the per-cell MAX across the six hours in the window
+    multiplied by `attenuation` to reflect GFS skill at long lead
+    times.
 
-    Returns (hours_payload, peaks) in the same schema the Day-1
-    pipeline emits, with `fh` 1..4 and `valid` at each window's
-    midpoint.
+    Returns (hours_payload, peaks) where peaks is keyed per hazard.
     """
     sample = next((r for r in results if r), None)
     if sample is None:
         raise RuntimeError("compute_gfs_day: no sample point available")
 
-    # The day begins `day_offset_hours` after the first valid hour.
-    # Day 2 offset = 24, Day 3 offset = 48. We need 24 consecutive
-    # hourly scores: offset .. offset+23.
     day_start = first_valid_utc + dt.timedelta(hours=day_offset_hours)
     indices = find_hour_indices(sample["hourly"], day_start, 24)
 
-    # Per-hour scores for all 24 hours of this day, with the diurnal
-    # weight applied per cell using each hour's UTC valid time.
+    # Per-hour hazard fields (dicts {tornado, wind, hail}) for the day.
     hour_fields = [
         score_hour(grid, results, idx,
                    valid_dt=day_start + dt.timedelta(hours=h))
@@ -352,40 +384,53 @@ def compute_gfs_day(grid, results, first_valid_utc, day_offset_hours,
     ]
 
     hours_payload = []
-    peak_fh, peak_score = 0, 0.0
+    peak_fh = {h: 0 for h in HAZARDS}
+    peak_score = {h: 0.0 for h in HAZARDS}
+
     for w in range(4):
         window = hour_fields[w * 6:(w + 1) * 6]
-        stacked = np.stack(window, axis=0)
-        win_max = np.max(stacked, axis=0) * attenuation
-        cells = common.sparse_cells(grid, win_max)
-        mx = float(np.nanmax(win_max)) if win_max.size else 0.0
-        if mx > peak_score:
-            peak_fh, peak_score = w + 1, mx
         midpoint = day_start + dt.timedelta(hours=w * 6 + 3)
-        hours_payload.append({
+        frame = {
             "fh": w + 1,
             "valid": common.isoformat(midpoint),
-            "tornado": {"cells": cells, "max": round(mx, 3)},
-        })
+        }
+        log_bits = []
+        for hazard in HAZARDS:
+            stacked = np.stack([wf[hazard] for wf in window], axis=0)
+            win_max = np.max(stacked, axis=0) * attenuation
+            cells = common.sparse_cells(grid, win_max)
+            mx = float(np.nanmax(win_max)) if win_max.size else 0.0
+            if mx > peak_score[hazard]:
+                peak_fh[hazard], peak_score[hazard] = w + 1, mx
+            frame[hazard] = {"cells": cells, "max": round(mx, 3)}
+            log_bits.append(f"{hazard[0].upper()}={mx:.2f}")
+        hours_payload.append(frame)
         print(f"[win {w + 1}/4  {midpoint.strftime('%Y-%m-%d %HZ')}]  "
-              f"cells={len(cells):3d}  peak={mx:.2f}")
+              + " ".join(log_bits))
 
-    peaks = {"tornado": {"fh": peak_fh, "score": round(peak_score, 3)}}
+    peaks = {hazard: {"fh": peak_fh[hazard],
+                      "score": round(peak_score[hazard], 3)}
+             for hazard in HAZARDS}
     return hours_payload, peaks
 
 
 def extract_hour_fields(grid, results, src_idx):
-    """Build the per-grid-cell 2-D numpy arrays needed by
-    `common.tornado_probability` for one forecast hour."""
+    """Build the per-grid-cell 2-D numpy arrays needed by all three
+    hazard blends (tornado / wind / hail) for one forecast hour."""
     ny, nx = grid.shape
-    cape = np.full(grid.shape, np.nan)
-    cin  = np.full(grid.shape, np.nan)
-    lcl  = np.full(grid.shape, np.nan)
+    cape  = np.full(grid.shape, np.nan)
+    cin   = np.full(grid.shape, np.nan)
+    lcl   = np.full(grid.shape, np.nan)
     srh01 = np.full(grid.shape, np.nan)
     srh03 = np.full(grid.shape, np.nan)
-    s01 = np.full(grid.shape, np.nan)
-    s03 = np.full(grid.shape, np.nan)
-    s06 = np.full(grid.shape, np.nan)
+    s01   = np.full(grid.shape, np.nan)
+    s03   = np.full(grid.shape, np.nan)
+    s06   = np.full(grid.shape, np.nan)
+    mean6 = np.full(grid.shape, np.nan)
+    t700  = np.full(grid.shape, np.nan)
+    td700 = np.full(grid.shape, np.nan)
+    t500  = np.full(grid.shape, np.nan)
+    fzlvl = np.full(grid.shape, 3000.0)
     precip = np.zeros(grid.shape)
     wc = np.zeros(grid.shape, dtype=np.int64)
     lapse = np.full(grid.shape, 6.5)
@@ -396,19 +441,25 @@ def extract_hour_fields(grid, results, src_idx):
         j = k % nx
         i = k // nx
         f = derive_fields(point["hourly"], src_idx)
-        cape[i, j] = f["cape"]
-        cin[i, j] = f["cin"]
-        lcl[i, j] = f["lcl"]
+        cape[i, j]  = f["cape"]
+        cin[i, j]   = f["cin"]
+        lcl[i, j]   = f["lcl"]
         srh01[i, j] = f["srh01"]
         srh03[i, j] = f["srh03"]
-        s01[i, j] = f["shear_01"]
-        s03[i, j] = f["shear_03"]
-        s06[i, j] = f["shear_06"]
-        precip[i, j] = f["precip"]
-        wc[i, j] = f["weather_code"]
+        s01[i, j]   = f["shear_01"]
+        s03[i, j]   = f["shear_03"]
+        s06[i, j]   = f["shear_06"]
+        mean6[i, j] = f["mean6"]
+        t700[i, j]  = f["t_700"]
+        td700[i, j] = f["td_700"]
+        t500[i, j]  = f["t_500"]
+        fzlvl[i, j] = f["freezing_level"]
+        precip[i, j]= f["precip"]
+        wc[i, j]    = f["weather_code"]
         lapse[i, j] = f["low_lapse"]
 
     return dict(cape=cape, cin=cin, lcl=lcl,
                 srh01=srh01, srh03=srh03,
-                s01=s01, s03=s03, s06=s06,
+                s01=s01, s03=s03, s06=s06, mean6=mean6,
+                t700=t700, td700=td700, t500=t500, fzlvl=fzlvl,
                 precip=precip, wc=wc, lapse=lapse)
