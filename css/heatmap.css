@@ -130,11 +130,12 @@ html, body {
 .brand {
   pointer-events: auto;
   display: inline-flex; align-items: center; gap: 8px;
-  padding: 5px 12px 5px 8px;
+  flex-wrap: nowrap;
+  max-width: calc(100vw - 32px);
+  padding: 5px 14px 5px 10px;
   background: var(--panel);
   border: 1px solid var(--line);
   border-radius: var(--r-pill);
-  text-decoration: none;
   color: var(--fg);
   backdrop-filter: blur(14px) saturate(140%);
   -webkit-backdrop-filter: blur(14px) saturate(140%);
@@ -142,6 +143,7 @@ html, body {
   transition: border-color 180ms var(--ease);
 }
 .brand:hover { border-color: var(--line-hi); }
+.brand > * { flex-shrink: 0; }
 .brand .mark {
   display: inline-flex;
   filter: drop-shadow(0 0 3px rgba(167, 139, 250, 0.45));
@@ -171,94 +173,72 @@ html, body {
   border: 1px solid rgba(239, 68, 68, 0.32);
 }
 
-/* ---------- inline status (lives inside the timeline pill) ----------
+/* ---------- brand-strip status (percentage + LIVE dot) -------------
 
    The percentage / time / live-dot trio used to be a separate floating
-   card on the right edge of the screen. It now sits inside the timeline
-   pill as `.timeline-status`, with the date+time tucked into a hover
-   tooltip. The `ro-pct` / `ro-time` / `ro-status` IDs are preserved so
-   js/heatmap.js's lookups don't change. */
+   card and then briefly an inline pill at the right of the timeline.
+   Both layouts had alignment issues; it now lives inline at the right
+   end of the brand strip at the top of the page. The `ro-pct`,
+   `ro-time`, `ro-status`, `ro-status-text` IDs are preserved so
+   js/heatmap.js doesn't need to change.                              */
 
-.timeline-status {
-  position: relative;
-  display: inline-flex; align-items: baseline; gap: 6px;
-  flex: none;
-  padding: 0 4px;
-  white-space: nowrap;
-  cursor: default;
+.b-divider {
+  display: inline-block;
+  width: 1px; height: 12px;
+  background: var(--line);
+  margin: 0 2px;
 }
-.ts-pct {
+.b-pct {
   font-family: "JetBrains Mono", ui-monospace, SFMono-Regular, monospace;
-  font-size: 14px;
+  font-size: 12px;
   font-weight: 600;
   line-height: 1;
+  letter-spacing: -0.005em;
   color: var(--fg);
-  letter-spacing: -0.01em;
   font-variant-numeric: tabular-nums;
-  transition: opacity 180ms var(--ease),
-              color 260ms var(--ease);
+  transition: color 260ms var(--ease), opacity 180ms var(--ease);
+  white-space: nowrap;
 }
-.ts-pct.tick { opacity: 0.45; }
-.ts-sep {
-  color: var(--dim);
-  font-weight: 500;
-  font-size: 11px;
-  line-height: 1;
-}
-.ts-status {
+.b-pct.tick { opacity: 0.45; }
+.b-status {
   display: inline-flex; align-items: center; gap: 5px;
   font-size: 9px;
   font-weight: 600;
-  letter-spacing: 0.10em;
+  letter-spacing: 0.08em;
   text-transform: uppercase;
   color: var(--muted);
+  white-space: nowrap;
 }
-.ts-status-text { transition: opacity 180ms var(--ease); }
+.b-status-text { transition: opacity 180ms var(--ease); }
 .ro-dot {
   width: 6px; height: 6px;
   border-radius: 50%;
   background: var(--dim);
   transition: background 180ms var(--ease);
 }
-.ts-status.live .ro-dot   { background: var(--ok); animation: dot-pulse 2.4s ease-in-out infinite; }
-.ts-status.stale .ro-dot  { background: var(--warn); }
-.ts-status.seed .ro-dot   { background: var(--accent); }
-.ts-status.error .ro-dot  { background: var(--error); }
+.b-status.live .ro-dot   { background: var(--ok); animation: dot-pulse 2.4s ease-in-out infinite; }
+.b-status.stale .ro-dot  { background: var(--warn); }
+.b-status.seed .ro-dot   { background: var(--accent); }
+.b-status.error .ro-dot  { background: var(--error); }
 
-/* Hover/focus tooltip showing the full date+time of the active frame.
-   Reuses the panel/border/shadow tokens for visual consistency with
-   the spark-tip and map-tip. */
-.ts-tooltip {
-  position: absolute;
-  bottom: calc(100% + 8px);
-  left: 50%;
-  transform: translateX(-50%);
-  padding: 4px 9px;
+/* The date/time of the active frame is plain inline metadata at the
+   far right of the brand strip — small, muted, never wraps. The
+   ro-time element keeps its ID so renderHour's setLabel(roTime, …)
+   keeps working without conditionals. */
+.b-time {
   font-family: "JetBrains Mono", ui-monospace, SFMono-Regular, monospace;
   font-size: 10px;
   font-weight: 500;
-  line-height: 1;
+  color: var(--muted);
   letter-spacing: 0.02em;
-  color: var(--fg);
-  background: var(--panel);
-  border: 1px solid var(--line);
-  border-radius: 6px;
-  box-shadow: var(--shadow-card);
   white-space: nowrap;
-  pointer-events: none;
-  opacity: 0;
-  transition: opacity 140ms var(--ease);
-  backdrop-filter: blur(10px);
-  -webkit-backdrop-filter: blur(10px);
-  z-index: 3;
+  transition: opacity 180ms var(--ease);
 }
-.timeline-status:hover .ts-tooltip,
-.timeline-status:focus-within .ts-tooltip { opacity: 1; }
+.b-time.tick { opacity: 0.5; }
 
-/* Hide the legacy floating readout — JS still references the IDs but
-   the markup no longer ships in index.html. Belt-and-suspenders rule
-   in case any older cached HTML lingers in a CDN/browser. */
-.readout { display: none !important; }
+/* Belt-and-suspenders: hide any legacy markup if it's cached in a
+   browser from an older deploy. */
+.readout, .timeline-status { display: none !important; }
 
 /* ---------- map hover tooltip (cursor probe) ---------- */
 
@@ -325,16 +305,15 @@ html, body {
   bottom: calc(14px + env(safe-area-inset-bottom, 0px));
   transform: translateX(-50%);
   z-index: 606;
-  /* auto | 1fr | auto | auto: pills | spark | inline-status | locate.
-     The spark stretches to fill the middle, so the slider always reads
-     as the visual focus of the pill regardless of how the side widths
-     change. */
+  /* Three columns: pills | slider | locate. The slider always
+     stretches to fill the middle so it reads as the visual focus
+     of the pill, and side widths stay predictable. */
   display: grid;
-  grid-template-columns: auto minmax(180px, 1fr) auto auto;
+  grid-template-columns: auto minmax(0, 1fr) auto;
   align-items: center;
   column-gap: 12px;
   padding: 8px 12px;
-  width: min(680px, calc(100vw - 28px));
+  width: min(580px, calc(100vw - 28px));
   background: var(--panel);
   border: 1px solid var(--line);
   border-radius: var(--r-card);
@@ -343,10 +322,9 @@ html, body {
   box-shadow: var(--shadow-card);
   animation: fade-up 460ms var(--ease) 60ms both;
 }
-.timeline > .day-pills      { justify-self: start; }
-.timeline > .spark-wrap     { justify-self: stretch; min-width: 0; }
-.timeline > .timeline-status{ justify-self: end; }
-.timeline > .icon-btn       { justify-self: end; }
+.timeline > .day-pills  { justify-self: start; }
+.timeline > .spark-wrap { justify-self: stretch; min-width: 0; }
+.timeline > .icon-btn   { justify-self: end; }
 
 .day-pills {
   display: inline-flex; align-items: center; gap: 1px;
@@ -639,7 +617,8 @@ html, body {
 @media (max-width: 760px) {
   .timeline { padding: 6px 10px; column-gap: 10px; }
   .pill { padding: 3px 8px; font-size: 9.5px; }
-  .ts-pct { font-size: 13px; }
+  .b-pct { font-size: 11px; }
+  .b-time { font-size: 9.5px; }
   .spark { height: 26px; }
   .spark-track { left: 9px; right: 9px; }
   .spark-ticks { left: 9px; right: 9px; }
@@ -648,18 +627,22 @@ html, body {
 }
 
 /* phone — drop the tick row and shrink the slider to a single track
-   line; the inline status compacts to "42% [dot]". */
+   line; the brand-strip status drops the "LIVE" word + the date so
+   it stays one line at narrow viewports. */
 @media (max-width: 540px) {
-  .brand { gap: 6px; padding: 4px 10px; }
+  .brand { gap: 6px; padding: 4px 10px 4px 8px; }
   .b-title { font-size: 11px; }
   .b-model { font-size: 9px; padding: 1px 5px; }
+  .b-divider { display: none; }
+  .b-pct { font-size: 11px; }
+  .b-status-text { display: none; }
+  .b-time { display: none; }
 
   .brand-strip { top: calc(10px + env(safe-area-inset-top, 0px)); }
   .timeline {
     bottom: calc(10px + env(safe-area-inset-bottom, 0px));
     width: calc(100vw - 20px);
     column-gap: 8px; padding: 6px 9px;
-    grid-template-columns: auto minmax(0, 1fr) auto auto;
   }
   .spark { height: 18px; }
   .spark-track { top: 7px; left: 8px; right: 8px; }
@@ -667,10 +650,6 @@ html, body {
   .spark-tip   { left: calc(8px + var(--x, 0) * (100% - 16px));
                   font-size: 9px; padding: 3px 6px; }
   .spark-ticks { display: none; }
-
-  .ts-pct { font-size: 12px; }
-  .ts-sep { display: none; }
-  .ts-status-text { display: none; }
 
   .pill { padding: 2px 7px; font-size: 9px; letter-spacing: 0.04em; }
   .icon-btn { width: 24px; height: 20px; }
