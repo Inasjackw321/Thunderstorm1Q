@@ -102,9 +102,9 @@ def seed_one(out_path, meta_path, day_offset_hours):
     hours = [{
         "fh": w + 1,
         "valid": common.isoformat(day_start + dt.timedelta(hours=w * 6 + 3)),
-        "tornado": {"cells": [], "max": 0.0},
+        **{hz: {"cells": [], "max": 0.0} for hz in fetcher.HAZARDS},
     } for w in range(FORECAST_FRAMES)]
-    peaks = {"tornado": {"fh": 0, "score": 0.0}}
+    peaks = {hz: {"fh": 0, "score": 0.0} for hz in fetcher.HAZARDS}
     source = "Thunderstorm1Q — seed (awaiting first Actions run)"
     payload = {
         "source": source,

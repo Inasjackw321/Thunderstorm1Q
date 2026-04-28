@@ -61,33 +61,38 @@ def run(out_path: str, meta_path: str):
                                            common.FORECAST_HOURS)
 
     hours_payload = []
-    peak_fh, peak_score = 0, 0.0
+    peak_fh = {h: 0 for h in fetcher.HAZARDS}
+    peak_score = {h: 0.0 for h in fetcher.HAZARDS}
 
     for fh in range(1, common.FORECAST_HOURS + 1):
         i_src = hourly_idx[fh - 1]
         valid_dt = first_valid + dt.timedelta(hours=fh - 1)
         if i_src is None:
+            empty = {hz: {"cells": [], "max": 0.0} for hz in fetcher.HAZARDS}
             hours_payload.append({
                 "fh": fh,
                 "valid": common.isoformat(valid_dt),
-                "tornado": {"cells": [], "max": 0.0},
+                **empty,
             })
             continue
 
-        tor = fetcher.score_hour(grid, results, i_src, valid_dt=valid_dt)
-        tor_cells = sparse_cells(grid, tor)
-        mx_t = float(np.nanmax(tor)) if tor.size else 0.0
-        if mx_t > peak_score:
-            peak_fh, peak_score = fh, mx_t
+        fields = fetcher.score_hour(grid, results, i_src, valid_dt=valid_dt)
+        frame = {"fh": fh, "valid": common.isoformat(valid_dt)}
+        log_bits = []
+        for hazard in fetcher.HAZARDS:
+            arr = fields[hazard]
+            cells = sparse_cells(grid, arr)
+            mx = float(np.nanmax(arr)) if arr.size else 0.0
+            if mx > peak_score[hazard]:
+                peak_fh[hazard], peak_score[hazard] = fh, mx
+            frame[hazard] = {"cells": cells, "max": round(mx, 3)}
+            log_bits.append(f"{hazard[0].upper()}={mx:.2f}")
+        hours_payload.append(frame)
+        print(f"[fh={fh:02d}] " + " ".join(log_bits))
 
-        hours_payload.append({
-            "fh": fh,
-            "valid": common.isoformat(valid_dt),
-            "tornado": {"cells": tor_cells, "max": round(mx_t, 3)},
-        })
-        print(f"[fh={fh:02d}] cells={len(tor_cells):3d}  peak={mx_t:.2f}")
-
-    peaks = {"tornado": {"fh": peak_fh, "score": round(peak_score, 3)}}
+    peaks = {hazard: {"fh": peak_fh[hazard],
+                      "score": round(peak_score[hazard], 3)}
+             for hazard in fetcher.HAZARDS}
 
     payload = {
         "source": f"Thunderstorm1Q — {MODEL_LABEL}",
@@ -121,9 +126,9 @@ def seed(out_path: str, meta_path: str):
     hours = [{
         "fh": fh,
         "valid": common.isoformat(now + dt.timedelta(hours=fh)),
-        "tornado": {"cells": [], "max": 0.0},
+        **{hz: {"cells": [], "max": 0.0} for hz in fetcher.HAZARDS},
     } for fh in range(1, common.FORECAST_HOURS + 1)]
-    peaks = {"tornado": {"fh": 0, "score": 0.0}}
+    peaks = {hz: {"fh": 0, "score": 0.0} for hz in fetcher.HAZARDS}
     payload = {
         "source": "Thunderstorm1Q — seed (awaiting first Actions run)",
         "model": MODEL_LABEL,

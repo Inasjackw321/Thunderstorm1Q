@@ -1,28 +1,34 @@
-// Thunderstorm1Q — 3-day T1 tornado risk map.
-// Reads data/day{1,2,3}.json written by scripts/update_day*.py every 5h.
-//   day 1 = 24 hourly frames (HRRR)
+// Thunderstorm1Q — 3-day T1 / W1 / H1 hazard risk map.
+// Reads data/day{1,2,3}.json written by scripts/update_day*.py every 12h.
+//   day 1 = 24 hourly frames (HRRR-auto)
 //   day 2 = 4 × 6h-max windows (GFS, ×0.85 skill)
 //   day 3 = 4 × 6h-max windows (GFS, ×0.70 skill)
+// Each frame ships three hazard slots — tornado / wind / hail — and
+// the user-selectable Hazard pill (T1 / W1 / H1) decides which the
+// heatmap currently renders.
 (function () {
   'use strict';
 
-  // Tornado gradient — mirrored in css/heatmap.css.
+  // Heat color gradient — same palette for every hazard, the absolute
+  // probability scale changes via HAZARD_SCALE so a 25 % wind day
+  // doesn't look as red as a 25 % tornado day.
   const GRADIENT = {
     0.00: '#22d3ee', 0.22: '#a3e635', 0.40: '#facc15',
     0.56: '#fb923c', 0.72: '#ef4444', 0.88: '#db2777',
     1.00: '#4c1d95',
   };
-  const HEAT_MAX = 0.6;
   const HEAT_RADIUS = 38;
   const HEAT_BLUR = 30;
-  const SIGNAL_MIN = 0.12;     // per-frame peak that lights a bar red.
-  const BAR_SCALE  = 0.6;      // matches HEAT_MAX so bars feel the heat.
+  const SIGNAL_MIN = 0.12;
+
+  // Per-hazard "what % counts as the top of the color ramp". Tornado
+  // is rare and saturates the color palette much earlier than wind.
+  const HAZARD_SCALE = { tornado: 0.45, wind: 0.65, hail: 0.55 };
+  const HAZARD_LABEL = { tornado: 'T1',  wind: 'W1',  hail: 'H1' };
 
   const POLL_MS = 5 * 60 * 1000;
-  const STALE_MIN = 840;       // 12h cron + a 2h grace period; anything older is "stale"
+  const STALE_MIN = 840;       // 12h cron + 2h grace period; anything older is "stale"
 
-  // Per-day metadata. `bars` is authoritative for the sparkline division
-  // count; `fh` labels in tooltips match the data file's `hours[].fh`.
   const DAYS = [
     { n: 1, label: '1-24h', bars: 24, fhPrefix: 'F' },
     { n: 2, label: 'Day 2', bars:  4, fhPrefix: 'W' },
@@ -47,9 +53,19 @@
   const mapTipPct = document.getElementById('map-tip-pct');
   const mapTipCrd = document.getElementById('map-tip-coord');
   const locateBtn  = document.getElementById('locate-btn');
+  const searchBtn  = document.getElementById('search-btn');
+  const searchPop  = document.getElementById('search-pop');
+  const searchInput= document.getElementById('search-input');
+  const searchGo   = document.getElementById('search-go');
   const locateErr  = document.getElementById('locate-error');
   const locateErrBody = document.getElementById('locate-error-body');
   const locateErrOk = document.getElementById('locate-error-ok');
+  const hazardEls  = Array.from(document.querySelectorAll('.haz'));
+  const pointPanel = document.getElementById('point-panel');
+  const ppTitle    = document.getElementById('pp-title');
+  const ppCoord    = document.getElementById('pp-coord');
+  const ppBody     = document.getElementById('pp-body');
+  const ppClose    = document.getElementById('pp-close');
 
   // CONUS bounds — same box the model is gridded over.
   const CONUS = { s: 24.5, w: -125.0, n: 49.5, e: -66.5 };
@@ -59,6 +75,7 @@
   const metas    = { 1: null, 2: null, 3: null };
 
   let currentDay = 1;
+  let currentHazard = 'tornado';   // 'tornado' | 'wind' | 'hail'
   let currentFh = 1;
   let totalFrames = DAYS[0].bars;
   let heatLayer = null;
@@ -110,10 +127,15 @@
   map.on('mousemove', onMapMove);
   map.on('mouseout',  hideMapTip);
 
+  hazardEls.forEach(el => el.addEventListener('click', () => {
+    const haz = el.dataset.hazard;
+    if (haz && haz !== currentHazard) switchHazard(haz);
+  }));
+
   // ---------- sparkline ----------
 
-  // Palette stops keyed to normalised probability (v / BAR_SCALE).
-  // Matches the leaflet-heat GRADIENT + left-rail CSS gradient.
+  // Palette stops keyed to normalised probability (v / HAZARD_SCALE).
+  // Matches the leaflet-heat GRADIENT.
   const STOPS = [
     [0.00, [0x22, 0xd3, 0xee]],
     [0.22, [0xa3, 0xe6, 0x35]],
@@ -187,7 +209,7 @@
     const hours = (d && d.hours) || [];
     const rec = hours.find(h => h.fh === currentFh) || hours[currentFh - 1];
     const mx  = rec ? (tornadoRec(rec).max || 0) : 0;
-    const t   = Math.max(0, Math.min(1, mx / BAR_SCALE));
+    const t   = Math.max(0, Math.min(1, mx / HAZARD_SCALE[currentHazard]));
 
     if (sparkFill) {
       const x = totalFrames <= 1 ? 0 : (currentFh - 1) / (totalFrames - 1);
@@ -346,6 +368,23 @@
     renderAll(/*keepFrame*/ false);
   }
 
+  function switchHazard(haz) {
+    if (!HAZARD_SCALE[haz]) return;
+    currentHazard = haz;
+    hazardEls.forEach(el => {
+      el.setAttribute('aria-selected',
+        String(el.dataset.hazard === haz));
+    });
+    // Re-render the map and the inline status with the new hazard's
+    // numbers. Keep the current frame so scrubbing position survives
+    // the toggle.
+    renderAll(/*keepFrame*/ true);
+    // If the location panel is open, refresh its 12-hour table too.
+    if (pointPanel && !pointPanel.hidden && lastPoint) {
+      paintPointPanel();
+    }
+  }
+
   function renderAll(keepFrame) {
     const d = datasets[currentDay];
     const spec = DAYS[currentDay - 1];
@@ -367,11 +406,19 @@
     renderHour(currentFh);
   }
 
-  function tornadoRec(rec) {
+  // Hazard-aware accessor: returns {cells, max} for the currently
+  // selected hazard. Falls back to legacy {cells, max} at the rec's
+  // root if the JSON pre-dates the multi-hazard schema, or to the
+  // tornado slot if a specific frame is missing the requested hazard.
+  function hazardRec(rec, hazard) {
     if (!rec) return { cells: [], max: 0 };
+    const want = hazard || currentHazard;
+    if (rec[want]) return rec[want];
     if (rec.tornado) return rec.tornado;
     return { cells: rec.cells || [], max: rec.max || 0 };
   }
+  // Legacy alias kept so any forgotten reference still works.
+  const tornadoRec = (rec) => hazardRec(rec, currentHazard);
 
   function setFrame(fh) {
     fh = Math.max(1, Math.min(totalFrames, fh));
@@ -390,7 +437,7 @@
     if (heatLayer) map.removeLayer(heatLayer);
     heatLayer = L.heatLayer(pts, {
       radius: HEAT_RADIUS, blur: HEAT_BLUR, maxZoom: 9,
-      max: HEAT_MAX, gradient: GRADIENT,
+      max: HAZARD_SCALE[currentHazard], gradient: GRADIENT,
     }).addTo(map);
 
     paintSpark();
@@ -447,10 +494,15 @@
     if (mapTip) mapTip.classList.remove('show');
   }
 
-  // ---------- geolocation (CONUS-gated) ----------
+  // ---------- chosen point (GPS or typed location) ----------
 
+  // The user can pick a point either via the GPS button or by typing
+  // a city/zip/lat-lon into the search popover. Either way we render
+  // a small home marker; clicking it opens the side panel with a
+  // 12-hour T1/W1/H1 table for that grid cell.
   let locateMarker = null;
   let locateRing   = null;
+  let lastPoint    = null;   // { lat, lon, label }
 
   function inCONUS(lat, lon) {
     return lat >= CONUS.s && lat <= CONUS.n &&
@@ -460,22 +512,40 @@
     if (locateMarker) { map.removeLayer(locateMarker); locateMarker = null; }
     if (locateRing)   { map.removeLayer(locateRing);   locateRing = null; }
   }
-  function dropLocateMarker(lat, lon) {
+
+  // SVG-backed home icon for the picked location. Built as a Leaflet
+  // divIcon so the marker is just an absolutely-positioned DOM node
+  // we can style and click — no Leaflet image hosting needed.
+  function homeDivIcon() {
+    const html =
+      '<div class="home-marker" title="Click for forecast">' +
+      '<svg viewBox="0 0 24 26" width="22" height="24" aria-hidden="true">' +
+      '<path class="home-fill" d="M12 1 L1 11 L4 11 L4 24 L10 24 L10 16 L14 16 L14 24 L20 24 L20 11 L23 11 Z"/>' +
+      '<rect class="home-roof" x="6" y="11" width="12" height="2"/>' +
+      '</svg></div>';
+    return L.divIcon({
+      className: 'home-divicon',
+      html, iconSize: [22, 24], iconAnchor: [11, 22],
+    });
+  }
+
+  function dropLocateMarker(lat, lon, label) {
     clearLocate();
     locateRing = L.circle([lat, lon], {
-      radius: 35000,             // ~35 km halo
-      color: '#38bdf8',
-      fillColor: '#38bdf8',
-      fillOpacity: 0.10,
+      radius: 35000,
+      color: 'rgba(167, 139, 250, 0.65)',
+      fillColor: 'rgba(167, 139, 250, 0.10)',
+      fillOpacity: 1,
       weight: 1,
     }).addTo(map);
-    locateMarker = L.circleMarker([lat, lon], {
-      radius: 6,
-      color: '#0b1226',
-      weight: 2,
-      fillColor: '#38bdf8',
-      fillOpacity: 1,
+    locateMarker = L.marker([lat, lon], {
+      icon: homeDivIcon(),
+      keyboard: true,
+      title: label || 'Forecast for this point',
     }).addTo(map);
+    locateMarker.on('click', openPointPanel);
+    lastPoint = { lat, lon, label: label || null };
+    openPointPanel();
   }
   function showLocateError(title, body) {
     if (!locateErr) return;
@@ -520,7 +590,7 @@
             + 'no marker was added. T1 only forecasts the CONUS domain.');
           return;
         }
-        dropLocateMarker(lat, lon);
+        dropLocateMarker(lat, lon, 'My location');
       },
       (err) => {
         if (locateBtn) locateBtn.classList.remove('loading');
@@ -534,6 +604,157 @@
   }
   if (locateBtn) locateBtn.addEventListener('click', locate);
 
+  // ---------- search by name or coordinates ----------
+
+  // Toggle the search popover open/closed.
+  function openSearch() {
+    if (!searchPop) return;
+    searchPop.hidden = false;
+    setTimeout(() => searchInput && searchInput.focus(), 30);
+  }
+  function closeSearch() {
+    if (!searchPop) return;
+    searchPop.hidden = true;
+  }
+  if (searchBtn) searchBtn.addEventListener('click', () => {
+    if (searchPop.hidden) openSearch(); else closeSearch();
+  });
+
+  // Detect a "lat,lon" or "lat lon" input and short-circuit the
+  // geocode call. Accepts e.g. "38.5,-97.5", "38.5 -97.5", " 38.5N , 97.5W ".
+  function parseLatLon(s) {
+    const cleaned = s.trim()
+      .replace(/[NSEW]/gi, m => (m.toUpperCase() === 'S' || m.toUpperCase() === 'W') ? '-' : '')
+      .replace(/\s+/g, ',');
+    const m = cleaned.match(/^(-?\d+(?:\.\d+)?),(-?\d+(?:\.\d+)?)$/);
+    if (!m) return null;
+    const lat = parseFloat(m[1]);
+    const lon = parseFloat(m[2]);
+    if (Math.abs(lat) > 90 || Math.abs(lon) > 180) return null;
+    return { lat, lon, label: `${lat.toFixed(2)}, ${lon.toFixed(2)}` };
+  }
+
+  // Open-Meteo's free geocoding endpoint. Returns the first US match
+  // when we can; falls back to whatever's first.
+  async function geocode(query) {
+    const url = 'https://geocoding-api.open-meteo.com/v1/search?'
+      + 'count=5&language=en&format=json&name='
+      + encodeURIComponent(query);
+    const r = await fetch(url, { cache: 'no-store' });
+    if (!r.ok) throw new Error('geocode HTTP ' + r.status);
+    const json = await r.json();
+    const results = (json && json.results) || [];
+    if (!results.length) return null;
+    const us = results.find(x => (x.country_code || '').toUpperCase() === 'US');
+    const pick = us || results[0];
+    const place = [pick.name, pick.admin1, pick.country_code]
+      .filter(Boolean).join(', ');
+    return { lat: pick.latitude, lon: pick.longitude, label: place };
+  }
+
+  async function runSearch() {
+    if (!searchInput) return;
+    const raw = searchInput.value || '';
+    if (!raw.trim()) return;
+
+    // Try lat/lon first to avoid an unnecessary network call.
+    const direct = parseLatLon(raw);
+    let pick = direct;
+    if (!pick) {
+      try {
+        pick = await geocode(raw);
+      } catch (_) { pick = null; }
+    }
+    if (!pick) {
+      showLocateError('Not found',
+        'Could not find a place matching that name. Try a city, '
+        + 'a "City, ST" pair, a ZIP, or coordinates like 38.5,-97.5.');
+      return;
+    }
+    if (!inCONUS(pick.lat, pick.lon)) {
+      showLocateError('Outside CONUS',
+        `${pick.label} is outside the contiguous United States, so `
+        + 'no marker was added. T1 only forecasts the CONUS domain.');
+      return;
+    }
+    dropLocateMarker(pick.lat, pick.lon, pick.label);
+    closeSearch();
+  }
+  if (searchGo)    searchGo.addEventListener('click', runSearch);
+  if (searchInput) searchInput.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter')  { e.preventDefault(); runSearch(); }
+    if (e.key === 'Escape') { e.preventDefault(); closeSearch(); }
+  });
+
+  // ---------- forecast panel for the chosen point ----------
+
+  // 12 hours of {fh, valid, percentages-per-hazard} for the cell
+  // closest to (lat, lon) on day 1's grid.
+  function pointForecast(lat, lon, hours) {
+    const d = datasets[1];
+    if (!d) return [];
+    const grid = d.grid_deg || 1.5;
+    const half = grid * 0.55;
+    const out = [];
+    const all = d.hours || [];
+    for (let i = 0; i < Math.min(hours, all.length); i++) {
+      const rec = all[i];
+      const row = { fh: rec.fh, valid: rec.valid };
+      for (const haz of ['tornado', 'wind', 'hail']) {
+        const cells = (rec[haz] && rec[haz].cells) || [];
+        let v = 0;
+        for (let j = 0; j < cells.length; j++) {
+          const c = cells[j];
+          if (Math.abs(c[0] - lat) <= half && Math.abs(c[1] - lon) <= half) {
+            v = c[2]; break;
+          }
+        }
+        row[haz] = v;
+      }
+      out.push(row);
+    }
+    return out;
+  }
+
+  function fmtHourLabel(iso) {
+    try {
+      const d = new Date(iso);
+      return d.toLocaleString('en-GB', {
+        hour: '2-digit', minute: '2-digit', hourCycle: 'h23',
+        timeZone: 'UTC',
+      }) + 'Z';
+    } catch { return iso || '—'; }
+  }
+
+  function paintPointPanel() {
+    if (!pointPanel || !lastPoint || !ppBody) return;
+    const rows = pointForecast(lastPoint.lat, lastPoint.lon, 12);
+    ppTitle.textContent = lastPoint.label || 'Selected point';
+    ppCoord.textContent =
+      `${lastPoint.lat.toFixed(2)}°N  ${lastPoint.lon.toFixed(2)}°E`
+        .replace('-', '').replace('°N', lastPoint.lat < 0 ? '°S' : '°N')
+        .replace('°E', lastPoint.lon < 0 ? '°W' : '°E');
+    const fmt = (v) => v >= 0.01 ? (v * 100).toFixed(0) + '%' : '—';
+    ppBody.innerHTML = rows.map(r => {
+      return `<tr>
+        <td>${fmtHourLabel(r.valid)}</td>
+        <td>${fmt(r.tornado)}</td>
+        <td>${fmt(r.wind)}</td>
+        <td>${fmt(r.hail)}</td>
+      </tr>`;
+    }).join('');
+  }
+
+  function openPointPanel() {
+    if (!pointPanel || !lastPoint) return;
+    paintPointPanel();
+    pointPanel.hidden = false;
+  }
+  function closePointPanel() {
+    if (pointPanel) pointPanel.hidden = true;
+  }
+  if (ppClose) ppClose.addEventListener('click', closePointPanel);
+
   function tintReadout(mx) {
     // Tint the percentage with the heat gradient when we have any
     // signal at all, but skip the box-shadow glow — the colored
@@ -543,7 +764,7 @@
       roPct.style.color = '';
       return;
     }
-    const t = Math.max(0, Math.min(1, mx / BAR_SCALE));
+    const t = Math.max(0, Math.min(1, mx / HAZARD_SCALE[currentHazard]));
     roPct.style.color = rgb(colorAt(t));
   }
 
@@ -612,6 +833,9 @@
     else if (e.key === '1') { switchDay(1); }
     else if (e.key === '2') { switchDay(2); }
     else if (e.key === '3') { switchDay(3); }
+    else if (e.key === 't' || e.key === 'T') { switchHazard('tornado'); }
+    else if (e.key === 'w' || e.key === 'W') { switchHazard('wind'); }
+    else if (e.key === 'h' || e.key === 'H') { switchHazard('hail'); }
   }
   function onSparkKey(e) {
     if (e.key === 'ArrowRight' || e.key === 'ArrowUp') {

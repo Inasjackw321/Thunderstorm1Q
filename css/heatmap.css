@@ -240,6 +240,238 @@ html, body {
    browser from an older deploy. */
 .readout, .timeline-status { display: none !important; }
 
+/* ---------- hazard toggle (T1 / W1 / H1) ----------
+
+   Sits above the bottom timeline so the slider stays uncluttered.
+   One pill, three tabs. The selected pill takes a tornado-tinted
+   accent so you always know which hazard is on the map. */
+
+.hazard-bar {
+  position: absolute;
+  left: 50%;
+  bottom: calc(64px + env(safe-area-inset-bottom, 0px));
+  transform: translateX(-50%);
+  z-index: 606;
+  display: inline-flex; gap: 2px;
+  padding: 3px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: var(--r-pill);
+  backdrop-filter: blur(14px) saturate(140%);
+  -webkit-backdrop-filter: blur(14px) saturate(140%);
+  box-shadow: var(--shadow-card);
+  animation: fade-up 460ms var(--ease) 80ms both;
+}
+.haz {
+  display: inline-flex; align-items: center; gap: 5px;
+  padding: 4px 11px;
+  font-family: "Inter", -apple-system, sans-serif;
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--muted);
+  background: transparent;
+  border: none;
+  border-radius: var(--r-pill);
+  cursor: pointer;
+  white-space: nowrap;
+  transition: color 140ms var(--ease),
+              background 140ms var(--ease);
+}
+.haz:hover { color: var(--fg); }
+.haz[aria-selected="true"] {
+  color: var(--fg);
+  background: rgba(239, 68, 68, 0.18);
+  box-shadow: inset 0 0 0 1px rgba(239, 68, 68, 0.42);
+}
+.haz-code {
+  font-family: "JetBrains Mono", ui-monospace, SFMono-Regular, monospace;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  color: inherit;
+}
+.haz-name { font-size: 11px; }
+.haz:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 1px var(--line-hi);
+}
+
+/* ---------- location group: search button + locate button ---------- */
+
+.loc-group {
+  display: inline-flex; gap: 4px;
+}
+
+/* ---------- search popover (type a city / zip / lat,lon) ---------- */
+
+.search-pop {
+  position: absolute;
+  left: 50%;
+  bottom: calc(120px + env(safe-area-inset-bottom, 0px));
+  transform: translateX(-50%);
+  z-index: 608;
+  display: flex; gap: 4px; align-items: center;
+  padding: 6px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: var(--r-pill);
+  backdrop-filter: blur(14px) saturate(140%);
+  -webkit-backdrop-filter: blur(14px) saturate(140%);
+  box-shadow: var(--shadow-card);
+  animation: fade-up 200ms var(--ease) both;
+}
+.search-pop[hidden] { display: none !important; }
+.search-pop input {
+  width: clamp(180px, 50vw, 280px);
+  padding: 5px 12px;
+  background: rgba(120, 140, 190, 0.06);
+  border: 1px solid transparent;
+  border-radius: var(--r-pill);
+  color: var(--fg);
+  font-family: inherit;
+  font-size: 12px;
+  outline: none;
+  transition: border-color 140ms var(--ease), background 140ms var(--ease);
+}
+.search-pop input::placeholder { color: var(--dim); }
+.search-pop input:focus {
+  border-color: var(--line-hi);
+  background: rgba(120, 140, 190, 0.10);
+}
+.search-go {
+  padding: 5px 12px;
+  font-family: "JetBrains Mono", ui-monospace, SFMono-Regular, monospace;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  color: var(--fg);
+  background: rgba(120, 140, 190, 0.14);
+  border: 1px solid var(--line-hi);
+  border-radius: var(--r-pill);
+  cursor: pointer;
+  transition: background 140ms var(--ease), border-color 140ms var(--ease);
+}
+.search-go:hover {
+  background: rgba(120, 140, 190, 0.22);
+  border-color: var(--muted);
+}
+
+/* ---------- "home" marker on the map ---------- */
+
+.home-marker {
+  position: relative;
+}
+.home-marker svg {
+  display: block;
+  filter: drop-shadow(0 2px 4px rgba(0, 0, 0, 0.45));
+  cursor: pointer;
+}
+.home-marker .home-fill {
+  fill: var(--accent);
+  stroke: rgba(0, 0, 0, 0.32);
+  stroke-width: 1;
+}
+.home-marker .home-roof { fill: rgba(0, 0, 0, 0.30); }
+
+/* ---------- point panel (clicked the home icon) ---------- */
+
+.point-panel {
+  position: absolute;
+  left: max(14px, env(safe-area-inset-left, 0px));
+  top: max(74px, env(safe-area-inset-top, 0px));
+  z-index: 608;
+  width: clamp(240px, 28vw, 320px);
+  padding: 12px 14px 10px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: var(--r-card);
+  backdrop-filter: blur(14px) saturate(140%);
+  -webkit-backdrop-filter: blur(14px) saturate(140%);
+  box-shadow: var(--shadow-card);
+  animation: fade-left 240ms var(--ease) both;
+}
+.point-panel[hidden] { display: none !important; }
+.pp-head {
+  display: flex; justify-content: space-between; align-items: baseline;
+  gap: 8px;
+  margin-bottom: 4px;
+}
+.pp-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--fg);
+  letter-spacing: 0.005em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.pp-close {
+  flex: none;
+  width: 22px; height: 22px;
+  padding: 0;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 50%;
+  color: var(--muted);
+  font-size: 18px;
+  line-height: 1;
+  cursor: pointer;
+  transition: color 140ms, background 140ms;
+}
+.pp-close:hover { color: var(--fg); background: rgba(120, 140, 190, 0.10); }
+.pp-coord {
+  font-family: "JetBrains Mono", ui-monospace, SFMono-Regular, monospace;
+  font-size: 10px;
+  color: var(--muted);
+  letter-spacing: 0.04em;
+  margin-bottom: 8px;
+}
+.pp-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-family: "JetBrains Mono", ui-monospace, SFMono-Regular, monospace;
+  font-size: 10.5px;
+  font-variant-numeric: tabular-nums;
+}
+.pp-h {
+  text-align: right;
+  padding: 4px 6px 6px;
+  font-weight: 600;
+  font-size: 9px;
+  letter-spacing: 0.10em;
+  text-transform: uppercase;
+  color: var(--dim);
+  border-bottom: 1px solid var(--line);
+}
+.pp-h:first-child { text-align: left; }
+.pp-table tbody td {
+  padding: 3px 6px;
+  text-align: right;
+  color: var(--fg);
+  border-bottom: 1px solid rgba(120, 140, 190, 0.06);
+}
+.pp-table tbody td:first-child {
+  text-align: left;
+  color: var(--muted);
+  letter-spacing: 0.02em;
+}
+.pp-table tbody tr:last-child td { border-bottom: none; }
+
+/* Phone: the point panel docks below the brand strip and shrinks. */
+@media (max-width: 540px) {
+  .point-panel {
+    left: 10px;
+    right: 10px;
+    top: calc(56px + env(safe-area-inset-top, 0px));
+    width: auto;
+    padding: 10px 12px 8px;
+  }
+  .hazard-bar { bottom: calc(58px + env(safe-area-inset-bottom, 0px)); }
+  .search-pop { bottom: calc(108px + env(safe-area-inset-bottom, 0px)); }
+  .haz { padding: 3px 9px; }
+  .haz-name { display: none; }
+}
+
 /* ---------- map hover tooltip (cursor probe) ---------- */
 
 .map-tip {
