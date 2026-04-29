@@ -407,14 +407,22 @@
   }
 
   // Hazard-aware accessor: returns {cells, max} for the currently
-  // selected hazard. Falls back to legacy {cells, max} at the rec's
-  // root if the JSON pre-dates the multi-hazard schema, or to the
-  // tornado slot if a specific frame is missing the requested hazard.
+  // selected hazard. Two fallback paths, in order:
+  //
+  //  1. If the rec has *any* of the three hazard slots
+  //     (tornado/wind/hail), use that schema strictly. A missing or
+  //     empty slot returns blank — we don't silently substitute the
+  //     tornado slot for a missing wind slot, since that would mask
+  //     "the cron hasn't shipped this hazard yet" as "the toggle
+  //     doesn't work".
+  //  2. Only when none of the three slots exist (true legacy schema
+  //     from pre-multi-hazard JSON) do we read cells/max off the rec
+  //     itself.
   function hazardRec(rec, hazard) {
     if (!rec) return { cells: [], max: 0 };
     const want = hazard || currentHazard;
-    if (rec[want]) return rec[want];
-    if (rec.tornado) return rec.tornado;
+    const hasMulti = rec.tornado || rec.wind || rec.hail;
+    if (hasMulti) return rec[want] || { cells: [], max: 0 };
     return { cells: rec.cells || [], max: rec.max || 0 };
   }
   // Legacy alias kept so any forgotten reference still works.
@@ -448,6 +456,12 @@
     setLabel(roPct,  (mx * 100).toFixed(0) + '%');
     setLabel(roTime, fmtDate(validIso) + ' · ' + fmtHour(validIso));
     tintReadout(mx);
+
+    // Keep the location panel's "right now" numbers in sync as the
+    // user scrubs the slider or jumps frames.
+    if (pointPanel && !pointPanel.hidden && lastPoint) {
+      paintPointPanel();
+    }
   }
 
   // ---------- map cursor probe ----------
@@ -498,10 +512,9 @@
 
   // The user can pick a point either via the GPS button or by typing
   // a city/zip/lat-lon into the search popover. Either way we render
-  // a small home marker; clicking it opens the side panel with a
-  // 12-hour T1/W1/H1 table for that grid cell.
+  // a small home marker; clicking it opens the side panel with the
+  // current frame's T1/W1/H1 percentages at that grid cell.
   let locateMarker = null;
-  let locateRing   = null;
   let lastPoint    = null;   // { lat, lon, label }
 
   function inCONUS(lat, lon) {
@@ -510,38 +523,35 @@
   }
   function clearLocate() {
     if (locateMarker) { map.removeLayer(locateMarker); locateMarker = null; }
-    if (locateRing)   { map.removeLayer(locateRing);   locateRing = null; }
   }
 
   // SVG-backed home icon for the picked location. Built as a Leaflet
   // divIcon so the marker is just an absolutely-positioned DOM node
   // we can style and click — no Leaflet image hosting needed.
   function homeDivIcon() {
+    // Minimal outlined house glyph: thin white stroke, no fill, no
+    // halo. Sized small (16 px) so it's a pointer-finger marker, not
+    // a competing visual element on the heatmap.
     const html =
-      '<div class="home-marker" title="Click for forecast">' +
-      '<svg viewBox="0 0 24 26" width="22" height="24" aria-hidden="true">' +
-      '<path class="home-fill" d="M12 1 L1 11 L4 11 L4 24 L10 24 L10 16 L14 16 L14 24 L20 24 L20 11 L23 11 Z"/>' +
-      '<rect class="home-roof" x="6" y="11" width="12" height="2"/>' +
+      '<div class="home-marker" title="Click for current conditions">' +
+      '<svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true">' +
+      '<path d="M3 11 L12 3 L21 11 V21 H14 V14 H10 V21 H3 Z"' +
+      ' fill="none" stroke="currentColor" stroke-width="1.8"' +
+      ' stroke-linejoin="round" stroke-linecap="round"/>' +
       '</svg></div>';
     return L.divIcon({
       className: 'home-divicon',
-      html, iconSize: [22, 24], iconAnchor: [11, 22],
+      html, iconSize: [16, 16], iconAnchor: [8, 14],
     });
   }
 
   function dropLocateMarker(lat, lon, label) {
     clearLocate();
-    locateRing = L.circle([lat, lon], {
-      radius: 35000,
-      color: 'rgba(167, 139, 250, 0.65)',
-      fillColor: 'rgba(167, 139, 250, 0.10)',
-      fillOpacity: 1,
-      weight: 1,
-    }).addTo(map);
+    // No more 35-km halo — just the icon. Less visual noise.
     locateMarker = L.marker([lat, lon], {
       icon: homeDivIcon(),
       keyboard: true,
-      title: label || 'Forecast for this point',
+      title: label || 'Current conditions',
     }).addTo(map);
     locateMarker.on('click', openPointPanel);
     lastPoint = { lat, lon, label: label || null };
@@ -688,61 +698,76 @@
 
   // ---------- forecast panel for the chosen point ----------
 
-  // 12 hours of {fh, valid, percentages-per-hazard} for the cell
-  // closest to (lat, lon) on day 1's grid.
-  function pointForecast(lat, lon, hours) {
+  // Per-hazard probability at (lat, lon) for the currently
+  // selected forecast frame on day 1. Returns {tornado, wind, hail}
+  // each in [0..1], with `null` when the rec is missing the hazard
+  // slot entirely (so the panel can render `—` instead of `0%`).
+  function pointNow(lat, lon) {
+    const out = { tornado: null, wind: null, hail: null, valid: null };
     const d = datasets[1];
-    if (!d) return [];
+    if (!d) return out;
+    const hours = d.hours || [];
+    const rec = hours.find(h => h.fh === currentFh) || hours[currentFh - 1];
+    if (!rec) return out;
+    out.valid = rec.valid;
     const grid = d.grid_deg || 1.5;
     const half = grid * 0.55;
-    const out = [];
-    const all = d.hours || [];
-    for (let i = 0; i < Math.min(hours, all.length); i++) {
-      const rec = all[i];
-      const row = { fh: rec.fh, valid: rec.valid };
-      for (const haz of ['tornado', 'wind', 'hail']) {
-        const cells = (rec[haz] && rec[haz].cells) || [];
-        let v = 0;
-        for (let j = 0; j < cells.length; j++) {
-          const c = cells[j];
-          if (Math.abs(c[0] - lat) <= half && Math.abs(c[1] - lon) <= half) {
-            v = c[2]; break;
-          }
+    const hasMulti = rec.tornado || rec.wind || rec.hail;
+    for (const haz of ['tornado', 'wind', 'hail']) {
+      const slot = hasMulti ? rec[haz] : (haz === 'tornado' ? rec : null);
+      if (!slot) { out[haz] = null; continue; }
+      const cells = slot.cells || [];
+      let v = 0;
+      for (let j = 0; j < cells.length; j++) {
+        const c = cells[j];
+        if (Math.abs(c[0] - lat) <= half && Math.abs(c[1] - lon) <= half) {
+          v = c[2]; break;
         }
-        row[haz] = v;
       }
-      out.push(row);
+      out[haz] = v;
     }
     return out;
   }
 
-  function fmtHourLabel(iso) {
-    try {
-      const d = new Date(iso);
-      return d.toLocaleString('en-GB', {
-        hour: '2-digit', minute: '2-digit', hourCycle: 'h23',
-        timeZone: 'UTC',
-      }) + 'Z';
-    } catch { return iso || '—'; }
-  }
-
+  // Write the three current-frame percentages into the panel slots.
+  // Numbers tinted with the heat gradient so severity reads at a
+  // glance — same colorAt() used for the slider fill.
   function paintPointPanel() {
-    if (!pointPanel || !lastPoint || !ppBody) return;
-    const rows = pointForecast(lastPoint.lat, lastPoint.lon, 12);
+    if (!pointPanel || !lastPoint) return;
+    const now = pointNow(lastPoint.lat, lastPoint.lon);
     ppTitle.textContent = lastPoint.label || 'Selected point';
+    const ns = lastPoint.lat >= 0 ? 'N' : 'S';
+    const ew = lastPoint.lon >= 0 ? 'E' : 'W';
     ppCoord.textContent =
-      `${lastPoint.lat.toFixed(2)}°N  ${lastPoint.lon.toFixed(2)}°E`
-        .replace('-', '').replace('°N', lastPoint.lat < 0 ? '°S' : '°N')
-        .replace('°E', lastPoint.lon < 0 ? '°W' : '°E');
-    const fmt = (v) => v >= 0.01 ? (v * 100).toFixed(0) + '%' : '—';
-    ppBody.innerHTML = rows.map(r => {
-      return `<tr>
-        <td>${fmtHourLabel(r.valid)}</td>
-        <td>${fmt(r.tornado)}</td>
-        <td>${fmt(r.wind)}</td>
-        <td>${fmt(r.hail)}</td>
-      </tr>`;
-    }).join('');
+      `${Math.abs(lastPoint.lat).toFixed(2)}°${ns}  `
+      + `${Math.abs(lastPoint.lon).toFixed(2)}°${ew}`;
+
+    const setSlot = (id, haz, v) => {
+      const el = document.getElementById(id);
+      if (!el) return;
+      if (v == null) {
+        el.textContent = '—';
+        el.style.color = '';
+        return;
+      }
+      el.textContent = v >= 0.01 ? (v * 100).toFixed(0) + '%' : '<2%';
+      if (v >= SIGNAL_MIN) {
+        const t = Math.max(0, Math.min(1, v / HAZARD_SCALE[haz]));
+        el.style.color = rgb(colorAt(t));
+      } else {
+        el.style.color = '';
+      }
+    };
+    setSlot('pp-t1', 'tornado', now.tornado);
+    setSlot('pp-w1', 'wind',    now.wind);
+    setSlot('pp-h1', 'hail',    now.hail);
+
+    const ppTime = document.getElementById('pp-time');
+    if (ppTime) {
+      ppTime.textContent = now.valid
+        ? fmtDate(now.valid) + ' · ' + fmtHour(now.valid)
+        : '—';
+    }
   }
 
   function openPointPanel() {

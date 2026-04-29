@@ -18,7 +18,7 @@
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
       integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY="
       crossorigin="" />
-<link rel="stylesheet" href="css/heatmap.css?v=2026-04-28c" />
+<link rel="stylesheet" href="css/heatmap.css?v=2026-04-29a" />
 </head>
 <body>
 
@@ -43,7 +43,14 @@
       <path d="M22 6 L10 22 H18 L16 34 L30 16 H22 Z" fill="url(#bolt-g)"/>
     </svg>
     <span class="b-title">Thunderstorm<span class="accent">1Q</span></span>
-    <span class="b-model">T1</span>
+    <span class="haz-group" role="tablist" aria-label="Hazard model">
+      <button class="haz-chip" role="tab" data-hazard="tornado" aria-selected="true"
+              title="T1 — tornado probability (press T)">T1</button>
+      <button class="haz-chip" role="tab" data-hazard="wind" aria-selected="false"
+              title="W1 — severe-wind probability (press W)">W1</button>
+      <button class="haz-chip" role="tab" data-hazard="hail" aria-selected="false"
+              title="H1 — significant-hail probability (press H)">H1</button>
+    </span>
     <span class="b-divider" aria-hidden="true"></span>
     <span class="b-pct" id="ro-pct">&mdash;</span>
     <span class="b-status" id="ro-status">
@@ -56,21 +63,6 @@
 
 <div id="state-banner" class="banner" hidden></div>
 
-<div class="hazard-bar" role="tablist" aria-label="Hazard model">
-  <button class="haz" role="tab" data-hazard="tornado" aria-selected="true"
-          title="T1 — tornado probability (press T)">
-    <span class="haz-code">T1</span><span class="haz-name">Tornado</span>
-  </button>
-  <button class="haz" role="tab" data-hazard="wind" aria-selected="false"
-          title="W1 — severe-wind probability (press W)">
-    <span class="haz-code">W1</span><span class="haz-name">Wind</span>
-  </button>
-  <button class="haz" role="tab" data-hazard="hail" aria-selected="false"
-          title="H1 — significant-hail probability (press H)">
-    <span class="haz-code">H1</span><span class="haz-name">Hail</span>
-  </button>
-</div>
-
 <div class="search-pop" id="search-pop" role="dialog"
      aria-label="Locate by name or coordinates" hidden>
   <input type="text" id="search-input" autocomplete="off" spellcheck="false"
@@ -78,23 +70,27 @@
   <button class="search-go" id="search-go" type="button">Go</button>
 </div>
 
-<div class="point-panel" id="point-panel" hidden aria-label="Location forecast">
+<div class="point-panel" id="point-panel" hidden aria-label="Current conditions">
   <header class="pp-head">
     <span class="pp-title" id="pp-title">&mdash;</span>
     <button class="pp-close" id="pp-close" type="button" aria-label="Close">&times;</button>
   </header>
   <div class="pp-coord" id="pp-coord">&mdash;</div>
-  <table class="pp-table" id="pp-table">
-    <thead>
-      <tr>
-        <th class="pp-h">Hour</th>
-        <th class="pp-h" title="T1 tornado probability">T1</th>
-        <th class="pp-h" title="W1 severe-wind probability">W1</th>
-        <th class="pp-h" title="H1 significant-hail probability">H1</th>
-      </tr>
-    </thead>
-    <tbody id="pp-body"></tbody>
-  </table>
+  <div class="pp-now" id="pp-now">
+    <div class="pp-row">
+      <span class="pp-key">T1 Tornado</span>
+      <span class="pp-val" id="pp-t1">&mdash;</span>
+    </div>
+    <div class="pp-row">
+      <span class="pp-key">W1 Wind</span>
+      <span class="pp-val" id="pp-w1">&mdash;</span>
+    </div>
+    <div class="pp-row">
+      <span class="pp-key">H1 Hail</span>
+      <span class="pp-val" id="pp-h1">&mdash;</span>
+    </div>
+  </div>
+  <div class="pp-time" id="pp-time">&mdash;</div>
 </div>
 
 <footer class="timeline" aria-label="Forecast timeline">
@@ -165,6 +161,6 @@
         integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo="
         crossorigin=""></script>
 <script src="https://unpkg.com/leaflet.heat@0.2.0/dist/leaflet-heat.js"></script>
-<script src="js/heatmap.js?v=2026-04-28c"></script>
+<script src="js/heatmap.js?v=2026-04-29a"></script>
 </body>
 </html>
