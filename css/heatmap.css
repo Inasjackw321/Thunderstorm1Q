@@ -161,18 +161,6 @@ html, body {
   background-clip: text;
   color: transparent;
 }
-.b-model {
-  font-family: "JetBrains Mono", ui-monospace, SFMono-Regular, monospace;
-  font-size: 9px;
-  font-weight: 600;
-  letter-spacing: 0.10em;
-  padding: 2px 7px;
-  border-radius: var(--r-pill);
-  color: var(--tornado);
-  background: rgba(239, 68, 68, 0.10);
-  border: 1px solid rgba(239, 68, 68, 0.32);
-}
-
 /* ---------- brand-strip status (percentage + LIVE dot) -------------
 
    The percentage / time / live-dot trio used to be a separate floating
@@ -242,55 +230,44 @@ html, body {
 
 /* ---------- hazard toggle (T1 / W1 / H1) ----------
 
-   Sits above the bottom timeline so the slider stays uncluttered.
-   One pill, three tabs. The selected pill takes a tornado-tinted
-   accent so you always know which hazard is on the map. */
+   Lives inline in the brand pill, replacing the old static T1 badge.
+   Three small mono chips share one rounded inner well so the
+   selector reads as part of the brand strip rather than a separate
+   floating control. */
 
-.hazard-bar {
-  position: absolute;
-  left: 50%;
-  bottom: calc(64px + env(safe-area-inset-bottom, 0px));
-  transform: translateX(-50%);
-  z-index: 606;
-  display: inline-flex; gap: 2px;
-  padding: 3px;
-  background: var(--panel);
+.haz-group {
+  display: inline-flex; gap: 1px;
+  padding: 2px;
+  background: rgba(120, 140, 190, 0.06);
   border: 1px solid var(--line);
   border-radius: var(--r-pill);
-  backdrop-filter: blur(14px) saturate(140%);
-  -webkit-backdrop-filter: blur(14px) saturate(140%);
-  box-shadow: var(--shadow-card);
-  animation: fade-up 460ms var(--ease) 80ms both;
 }
-.haz {
-  display: inline-flex; align-items: center; gap: 5px;
-  padding: 4px 11px;
-  font-family: "Inter", -apple-system, sans-serif;
-  font-size: 11px;
-  font-weight: 500;
+.haz-chip {
+  padding: 2px 7px;
+  font-family: "JetBrains Mono", ui-monospace, SFMono-Regular, monospace;
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 0.10em;
   color: var(--muted);
   background: transparent;
   border: none;
   border-radius: var(--r-pill);
   cursor: pointer;
   white-space: nowrap;
+  line-height: 1.2;
   transition: color 140ms var(--ease),
               background 140ms var(--ease);
 }
-.haz:hover { color: var(--fg); }
-.haz[aria-selected="true"] {
+.haz-chip:hover { color: var(--fg); }
+.haz-chip[aria-selected="true"] {
   color: var(--fg);
-  background: rgba(239, 68, 68, 0.18);
+  background: rgba(239, 68, 68, 0.14);
   box-shadow: inset 0 0 0 1px rgba(239, 68, 68, 0.42);
 }
-.haz-code {
-  font-family: "JetBrains Mono", ui-monospace, SFMono-Regular, monospace;
-  font-size: 10px;
-  font-weight: 600;
-  letter-spacing: 0.04em;
-  color: inherit;
+.haz-chip:focus-visible {
+  outline: none;
+  box-shadow: inset 0 0 0 1px var(--line-hi);
 }
-.haz-name { font-size: 11px; }
 .haz:focus-visible {
   outline: none;
   box-shadow: 0 0 0 1px var(--line-hi);
@@ -360,18 +337,15 @@ html, body {
 
 .home-marker {
   position: relative;
+  color: var(--fg);
+  cursor: pointer;
+  transition: transform 140ms var(--ease), color 140ms var(--ease);
 }
+.home-marker:hover { transform: translateY(-1px); color: var(--accent); }
 .home-marker svg {
   display: block;
-  filter: drop-shadow(0 2px 4px rgba(0, 0, 0, 0.45));
-  cursor: pointer;
+  filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.6));
 }
-.home-marker .home-fill {
-  fill: var(--accent);
-  stroke: rgba(0, 0, 0, 0.32);
-  stroke-width: 1;
-}
-.home-marker .home-roof { fill: rgba(0, 0, 0, 0.30); }
 
 /* ---------- point panel (clicked the home icon) ---------- */
 
@@ -426,36 +400,44 @@ html, body {
   letter-spacing: 0.04em;
   margin-bottom: 8px;
 }
-.pp-table {
-  width: 100%;
-  border-collapse: collapse;
-  font-family: "JetBrains Mono", ui-monospace, SFMono-Regular, monospace;
-  font-size: 10.5px;
-  font-variant-numeric: tabular-nums;
+/* Three-row "right now" block: T1 / W1 / H1 percentages at the
+   chosen point for the active forecast frame. */
+.pp-now {
+  display: flex; flex-direction: column;
+  margin: 4px 0 6px;
 }
-.pp-h {
-  text-align: right;
-  padding: 4px 6px 6px;
-  font-weight: 600;
-  font-size: 9px;
-  letter-spacing: 0.10em;
-  text-transform: uppercase;
-  color: var(--dim);
-  border-bottom: 1px solid var(--line);
-}
-.pp-h:first-child { text-align: left; }
-.pp-table tbody td {
-  padding: 3px 6px;
-  text-align: right;
-  color: var(--fg);
+.pp-row {
+  display: flex; justify-content: space-between; align-items: baseline;
+  padding: 6px 0;
   border-bottom: 1px solid rgba(120, 140, 190, 0.06);
 }
-.pp-table tbody td:first-child {
-  text-align: left;
+.pp-row:last-child { border-bottom: none; }
+.pp-key {
+  font-family: "JetBrains Mono", ui-monospace, SFMono-Regular, monospace;
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 0.10em;
+  text-transform: uppercase;
   color: var(--muted);
-  letter-spacing: 0.02em;
 }
-.pp-table tbody tr:last-child td { border-bottom: none; }
+.pp-val {
+  font-family: "JetBrains Mono", ui-monospace, SFMono-Regular, monospace;
+  font-size: 14px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  font-variant-numeric: tabular-nums;
+  color: var(--fg);
+  transition: color 200ms var(--ease);
+}
+.pp-time {
+  font-family: "JetBrains Mono", ui-monospace, SFMono-Regular, monospace;
+  font-size: 9.5px;
+  font-weight: 500;
+  color: var(--dim);
+  letter-spacing: 0.02em;
+  text-align: right;
+  margin-top: 2px;
+}
 
 /* Phone: the point panel docks below the brand strip and shrinks. */
 @media (max-width: 540px) {
@@ -466,10 +448,7 @@ html, body {
     width: auto;
     padding: 10px 12px 8px;
   }
-  .hazard-bar { bottom: calc(58px + env(safe-area-inset-bottom, 0px)); }
   .search-pop { bottom: calc(108px + env(safe-area-inset-bottom, 0px)); }
-  .haz { padding: 3px 9px; }
-  .haz-name { display: none; }
 }
 
 /* ---------- map hover tooltip (cursor probe) ---------- */
@@ -537,21 +516,21 @@ html, body {
   bottom: calc(14px + env(safe-area-inset-bottom, 0px));
   transform: translateX(-50%);
   z-index: 606;
-  /* Three columns: pills | slider | locate. The slider always
-     stretches to fill the middle so it reads as the visual focus
-     of the pill, and side widths stay predictable. */
+  /* Three columns: pills | slider | locate. Ghost-on-map — no card
+     background or shadow so the slider reads as part of the page
+     instead of a heavy chrome strip. */
   display: grid;
   grid-template-columns: auto minmax(0, 1fr) auto;
   align-items: center;
   column-gap: 12px;
-  padding: 8px 12px;
+  padding: 4px 6px;
   width: min(580px, calc(100vw - 28px));
-  background: var(--panel);
-  border: 1px solid var(--line);
-  border-radius: var(--r-card);
-  backdrop-filter: blur(14px) saturate(140%);
-  -webkit-backdrop-filter: blur(14px) saturate(140%);
-  box-shadow: var(--shadow-card);
+  background: transparent;
+  border: none;
+  border-radius: 0;
+  box-shadow: none;
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
   animation: fade-up 460ms var(--ease) 60ms both;
 }
 .timeline > .day-pills  { justify-self: start; }
@@ -562,10 +541,14 @@ html, body {
   display: inline-flex; align-items: center; gap: 1px;
   flex: none;
   padding: 2px;
-  background: rgba(120, 140, 190, 0.06);
-  border: 1px solid var(--line);
+  background: rgba(11, 16, 32, 0.55);
+  border: 1px solid transparent;
   border-radius: var(--r-pill);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  transition: border-color 140ms var(--ease);
 }
+.day-pills:hover { border-color: var(--line); }
 .pill {
   padding: 3px 9px;
   font-family: "JetBrains Mono", ui-monospace, SFMono-Regular, monospace;
@@ -597,22 +580,24 @@ html, body {
   display: inline-flex; align-items: center; justify-content: center;
   width: 24px; height: 22px;
   padding: 0;
-  background: rgba(120, 140, 190, 0.06);
-  border: 1px solid var(--line);
+  background: rgba(11, 16, 32, 0.55);
+  border: 1px solid transparent;
   border-radius: var(--r-pill);
   color: var(--muted);
   font-size: 14px;
   font-weight: 500;
   line-height: 1;
   cursor: pointer;
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
   transition: color 140ms var(--ease),
               background 140ms var(--ease),
               border-color 140ms var(--ease);
 }
 .icon-btn:hover {
   color: var(--fg);
-  border-color: var(--line-hi);
-  background: rgba(120, 140, 190, 0.12);
+  border-color: var(--line);
+  background: rgba(11, 16, 32, 0.78);
 }
 .icon-btn:focus-visible {
   outline: none;
@@ -723,7 +708,8 @@ html, body {
   top: 7px;
   height: 4px;
   border-radius: var(--r-pill);
-  background: rgba(120, 140, 190, 0.18);
+  background: rgba(120, 140, 190, 0.14);
+  box-shadow: 0 0 0 1px rgba(11, 16, 32, 0.45);
   overflow: hidden;
 }
 .spark-fill {
@@ -864,7 +850,7 @@ html, body {
 @media (max-width: 540px) {
   .brand { gap: 6px; padding: 4px 10px 4px 8px; }
   .b-title { font-size: 11px; }
-  .b-model { font-size: 9px; padding: 1px 5px; }
+  .haz-chip { font-size: 8.5px; padding: 2px 6px; }
   .b-divider { display: none; }
   .b-pct { font-size: 11px; }
   .b-status-text { display: none; }
